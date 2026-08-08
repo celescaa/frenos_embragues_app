@@ -1,0 +1,49 @@
+{% extends "base.html" %}
+{% block title %}Stock | Frenos & Embragues{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mb-0"><i class="bi bi-box-seam"></i> Stock de productos</h4>
+  <a href="{{ url_for('productos_nuevo') }}" class="btn btn-primary"><i class="bi bi-plus-lg"></i> Nuevo producto</a>
+</div>
+
+<form class="mb-3" method="get">
+  <input type="text" name="q" value="{{ q }}" class="form-control" placeholder="Buscar por código, nombre o marca...">
+</form>
+
+<div class="card p-3">
+  <table class="table table-hover align-middle mb-0">
+    <thead>
+      <tr><th></th><th>Código</th><th>Nombre</th><th>Categoría</th><th>Marca</th><th>Compatible con</th><th class="text-end">Costo</th><th class="text-end">Precio</th><th class="text-end">Stock</th><th></th></tr>
+    </thead>
+    <tbody>
+    {% for p in productos %}
+      <tr class="{{ 'low-stock' if p.stock_actual <= p.stock_minimo else '' }}">
+        <td>
+          {% if p.imagen %}
+            <img src="{{ url_for('static', filename='img/productos/' + p.imagen) }}" alt="" style="width:40px;height:40px;object-fit:cover;border-radius:6px;">
+          {% else %}
+            <span class="text-muted"><i class="bi bi-image" style="font-size:1.3rem;"></i></span>
+          {% endif %}
+        </td>
+        <td>{{ p.codigo }}</td>
+        <td>{{ p.nombre }}</td>
+        <td><span class="badge bg-secondary">{{ p.categoria }}</span></td>
+        <td>{{ p.marca }}</td>
+        <td>{{ p.modelo_compatible }}</td>
+        <td class="text-end">{{ p.precio_costo|money }}</td>
+        <td class="text-end">{{ p.precio_venta|money }}</td>
+        <td class="text-end">{{ p.stock_actual }} <span class="text-muted">/ min {{ p.stock_minimo }}</span></td>
+        <td class="text-end">
+          <a href="{{ url_for('productos_editar', producto_id=p.id) }}" class="btn btn-sm btn-outline-secondary"><i class="bi bi-pencil"></i></a>
+          <form method="post" action="{{ url_for('productos_eliminar', producto_id=p.id) }}" class="d-inline" onsubmit="return confirm('¿Eliminar este producto?');">
+            <button class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>
+          </form>
+        </td>
+      </tr>
+    {% else %}
+      <tr><td colspan="10" class="text-center text-muted py-4">No hay productos cargados todavía.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

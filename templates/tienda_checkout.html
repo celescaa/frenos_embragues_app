@@ -1,0 +1,67 @@
+{% extends "base_publica.html" %}
+{% block title %}Finalizar compra | {{ negocio.nombre }}{% endblock %}
+{% block content %}
+
+<h4 class="mb-3"><i class="bi bi-bag-check"></i> Finalizar compra</h4>
+
+<div class="row">
+  <div class="col-md-7 mb-3">
+    <div class="card p-4">
+      {% if not tienda_lista %}
+        <div class="alert alert-warning">
+          <i class="bi bi-exclamation-triangle"></i> El cobro online todavía se está terminando de configurar.
+          Podés dejar tus datos igual y te contactamos por WhatsApp para coordinar el pago
+          (<a href="{{ whatsapp_url() }}" target="_blank" rel="noopener"><i class="bi bi-whatsapp"></i> {{ negocio.telefono }}</a>).
+        </div>
+      {% endif %}
+      <form method="post">
+        <div class="mb-3">
+          <label class="form-label">Nombre y apellido *</label>
+          <input type="text" name="nombre" class="form-control" required>
+        </div>
+        <div class="row">
+          <div class="col-md-6 mb-3">
+            <label class="form-label">Teléfono *</label>
+            <input type="text" name="telefono" class="form-control" required>
+          </div>
+          <div class="col-md-6 mb-3">
+            <label class="form-label">Email</label>
+            <input type="email" name="email" class="form-control">
+          </div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Dirección de envío (o "retiro en local")</label>
+          <input type="text" name="direccion" class="form-control">
+        </div>
+        <div class="mb-3">
+          <label class="form-label">CUIT / DNI para la factura (opcional)</label>
+          <input type="text" name="cuit_dni" class="form-control" placeholder="Si lo dejás vacío, se factura a Consumidor Final">
+        </div>
+        <button type="submit" class="btn btn-primary w-100">
+          <i class="bi bi-credit-card"></i> Pagar con Mercado Pago
+        </button>
+      </form>
+    </div>
+  </div>
+
+  <div class="col-md-5 mb-3">
+    <div class="card p-4">
+      <h6>Resumen</h6>
+      <table class="table table-sm">
+        <tbody>
+        {% for it in items %}
+          <tr>
+            <td>{{ it.nombre }} <span class="text-muted small">x{{ it.cantidad }}</span></td>
+            <td class="text-end">{{ it.subtotal|money }}</td>
+          </tr>
+        {% endfor %}
+        </tbody>
+        <tfoot>
+          <tr><th>Total</th><th class="text-end">{{ total|money }}</th></tr>
+        </tfoot>
+      </table>
+    </div>
+  </div>
+</div>
+
+{% endblock %}

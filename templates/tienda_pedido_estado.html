@@ -1,0 +1,39 @@
+{% extends "base_publica.html" %}
+{% block title %}Tu pedido | {{ negocio.nombre }}{% endblock %}
+{% block content %}
+
+<div class="card p-4 text-center" style="max-width: 520px; margin: 0 auto;">
+  {% if resultado == "exito" %}
+    <i class="bi bi-check-circle-fill text-success" style="font-size: 3rem;"></i>
+    <h4 class="mt-3">¡Gracias por tu compra!</h4>
+    <p class="text-muted">
+      {% if pedido and pedido.estado == "pagado" %}
+        Tu pago se confirmó y ya estamos preparando tu pedido.
+      {% else %}
+        Estamos confirmando tu pago con Mercado Pago — puede tardar unos minutos.
+        Te vamos a contactar por WhatsApp apenas esté confirmado.
+      {% endif %}
+    </p>
+  {% elif resultado == "pendiente" %}
+    <i class="bi bi-hourglass-split text-warning" style="font-size: 3rem;"></i>
+    <h4 class="mt-3">Pago pendiente</h4>
+    <p class="text-muted">Tu pago está siendo procesado por Mercado Pago. Te avisamos apenas se confirme.</p>
+  {% else %}
+    <i class="bi bi-x-circle-fill text-danger" style="font-size: 3rem;"></i>
+    <h4 class="mt-3">No se pudo procesar el pago</h4>
+    <p class="text-muted">Podés volver a intentarlo o escribirnos por WhatsApp para coordinar el pedido.</p>
+  {% endif %}
+
+  {% if pedido %}
+    <div class="text-muted small mt-2">Pedido N° {{ pedido.id }} · {{ pedido.total|money }}</div>
+  {% endif %}
+
+  <div class="mt-4 d-flex justify-content-center gap-2">
+    <a href="{{ url_for('tienda_catalogo') }}" class="btn btn-outline-primary">Seguir comprando</a>
+    <a href="{{ whatsapp_url('Hola! Te escribo por el pedido N° ' + (pedido.id|string if pedido else '')) }}" target="_blank" rel="noopener" class="btn btn-primary">
+      <i class="bi bi-whatsapp"></i> Escribinos
+    </a>
+  </div>
+</div>
+
+{% endblock %}

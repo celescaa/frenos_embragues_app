@@ -1,0 +1,346 @@
+{% extends "base.html" %}
+{% block title %}Nueva compra{% endblock %}
+{% block content %}
+<h4 class="mb-3"><i class="bi bi-bag-plus"></i> Nueva compra a proveedor</h4>
+
+<form method="post" id="compraForm">
+  <div class="card p-4 mb-3">
+    <div class="row">
+      <div class="col-md-6 mb-3">
+        <label class="form-label">Proveedor</label>
+        <select name="proveedor_id" id="proveedorSelect" class="form-select">
+          <option value="">-- Elegir proveedor --</option>
+          {% for p in proveedores %}
+            <option value="{{ p.id }}">{{ p.nombre }}</option>
+          {% endfor %}
+        </select>
+        <div class="form-check form-check-inline mt-1">
+          <input class="form-check-input" type="checkbox" id="toggleProveedorNuevo" onchange="toggleProveedorNuevo(this)">
+          <label class="form-check-label small" for="toggleProveedorNuevo">Es un proveedor nuevo</label>
+        </div>
+      </div>
+      <div class="col-md-6 mb-3">
+        <label class="form-label">N° de factura del proveedor</label>
+        <input type="text" name="numero_factura_proveedor" class="form-control">
+      </div>
+    </div>
+
+    <div id="bloqueProveedorNuevo" class="row border-top pt-3 mt-2" style="display:none;">
+      <div class="col-md-6 mb-3">
+        <label class="form-label">Nombre del proveedor nuevo</label>
+        <input type="text" name="proveedor_nuevo_nombre" class="form-control">
+      </div>
+      <div class="col-md-6 mb-3">
+        <label class="form-label">CUIT</label>
+        <input type="text" name="proveedor_nuevo_cuit" class="form-control">
+      </div>
+      <div class="col-md-6 mb-3">
+        <label class="form-label">Email</label>
+        <input type="email" name="proveedor_nuevo_email" class="form-control">
+      </div>
+      <div class="col-md-6 mb-3">
+        <label class="form-label">Teléfono</label>
+        <input type="text" name="proveedor_nuevo_telefono" class="form-control">
+      </div>
+    </div>
+  </div>
+
+  <div class="card p-4 mb-3">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <h6 class="mb-0">Productos comprados (repone stock)</h6>
+      <button type="button" class="btn btn-sm btn-outline-primary" onclick="agregarFila()"><i class="bi bi-plus-lg"></i> Agregar producto</button>
+    </div>
+    <table class="table" id="itemsTable">
+      <thead><tr><th style="width:45%;">Producto</th><th style="width:120px;">Cantidad</th><th style="width:160px;">Costo unit.</th><th></th></tr></thead>
+      <tbody id="itemsBody"></tbody>
+    </table>
+  </div>
+
+  <button type="submit" class="btn btn-primary">Registrar compra</button>
+  <a href="{{ url_for('compras_lista') }}" class="btn btn-link">Cancelar</a>
+</form>
+
+<template id="filaTemplate">
+  <tr>
+    <td>
+      <div class="position-relative">
+        <input type="text" class="form-control producto-buscar" autocomplete="off" required
+               placeholder="Buscar por nombre, código o marca...">
+        <input type="hidden" name="producto_id" class="producto-id">
+        <div class="list-group producto-resultados position-absolute w-100 shadow" style="z-index: 1050; max-height: 260px; overflow-y: auto; display: none;"></div>
+      </div>
+    </td>
+    <td><input type="number" name="cantidad" min="1" value="1" class="form-control" required></td>
+    <td><input type="number" step="0.01" name="precio_unitario" class="form-control" required></td>
+    <td><button type="button" class="btn btn-sm btn-outline-danger" onclick="this.closest('tr').remove()"><i class="bi bi-trash"></i></button></td>
+  </tr>
+</template>
+
+<div class="modal fade" id="modalNuevoProducto" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-box-seam"></i> Nuevo producto</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div id="nuevoProductoError" class="alert alert-danger py-2 d-none"></div>
+        <div class="mb-3">
+          <label class="form-label">Nombre *</label>
+          <input type="text" id="npNombre" class="form-control" required>
+        </div>
+        <div class="row">
+          <div class="col-md-6 mb-3">
+            <label class="form-label">Código interno</label>
+            <input type="text" id="npCodigo" class="form-control" placeholder="Opcional">
+          </div>
+          <div class="col-md-6 mb-3">
+            <label class="form-label">Categoría</label>
+            <select id="npCategoria" class="form-select">
+              {% for c in categorias %}
+                <option value="{{ c }}">{{ c }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+        <div class="row">
+          <div class="col-md-6 mb-3">
+            <label class="form-label">Subcategoría</label>
+            <select id="npSubcategoria" class="form-select">
+              <option value="">-- Sin especificar --</option>
+            </select>
+          </div>
+          <div class="col-md-6 mb-3">
+            <label class="form-label">Marca</label>
+            <input type="text" id="npMarca" class="form-control">
+          </div>
+        </div>
+        <div class="row">
+          <div class="col-md-6 mb-3">
+            <label class="form-label">Stock mínimo</label>
+            <input type="number" id="npStockMinimo" class="form-control" value="2" min="0">
+          </div>
+        </div>
+        <div class="row">
+          <div class="col-md-6 mb-3">
+            <label class="form-label">Precio costo</label>
+            <input type="number" step="0.01" id="npPrecioCosto" class="form-control">
+          </div>
+          <div class="col-md-6 mb-3">
+            <label class="form-label">Precio de venta sugerido</label>
+            <input type="number" step="0.01" id="npPrecioVenta" class="form-control">
+          </div>
+        </div>
+        <div class="form-text">Arranca con stock 0 — esta misma compra le suma la cantidad que cargues en la fila.</div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-link" data-bs-dismiss="modal">Cancelar</button>
+        <button type="button" class="btn btn-primary" id="btnGuardarProducto">Guardar y usar en esta compra</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const PRODUCTOS = {{ productos_json|tojson }};
+
+// Buscador de productos tipo autocompletar: no case-sensitive, filtra por
+// nombre, código o marca a medida que se escribe (igual que en Nueva venta).
+function inicializarBuscador(fila) {
+  const buscarInput = fila.querySelector('.producto-buscar');
+  const idInput = fila.querySelector('.producto-id');
+  const resultados = fila.querySelector('.producto-resultados');
+  const costoInput = fila.querySelector('input[name="precio_unitario"]');
+
+  function ocultar() { resultados.style.display = 'none'; resultados.innerHTML = ''; }
+
+  function mostrarResultados(lista) {
+    resultados.innerHTML = '';
+    if (lista.length === 0) {
+      const vacio = document.createElement('div');
+      vacio.className = 'list-group-item text-muted small';
+      vacio.textContent = 'No hay productos que coincidan.';
+      resultados.appendChild(vacio);
+    }
+    lista.slice(0, 8).forEach(function(p) {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'list-group-item list-group-item-action py-2';
+      item.innerHTML = '<div class="d-flex justify-content-between align-items-center">' +
+        '<span>' + p.nombre + ' <span class="text-muted small">(' + (p.codigo || 's/código') + (p.marca ? ' · ' + p.marca : '') + ')</span></span>' +
+        '<span class="text-muted small">stock actual: ' + p.stock_actual + '</span></div>';
+      item.addEventListener('mousedown', function(e) {
+        e.preventDefault();
+        idInput.value = p.id;
+        buscarInput.value = p.nombre + ' (' + (p.codigo || 's/código') + ')';
+        costoInput.value = p.precio_costo;
+        ocultar();
+      });
+      resultados.appendChild(item);
+    });
+    const crearNuevo = document.createElement('button');
+    crearNuevo.type = 'button';
+    crearNuevo.className = 'list-group-item list-group-item-action py-2 text-primary';
+    crearNuevo.innerHTML = '<i class="bi bi-plus-lg"></i> Crear producto nuevo' +
+      (buscarInput.value.trim() ? ' "' + buscarInput.value.trim() + '"' : '');
+    crearNuevo.addEventListener('mousedown', function(e) {
+      e.preventDefault();
+      ocultar();
+      abrirModalNuevoProducto(fila, buscarInput.value.trim(), null, costoInput.value);
+    });
+    resultados.appendChild(crearNuevo);
+    resultados.style.display = 'block';
+  }
+
+  buscarInput.addEventListener('input', function() {
+    idInput.value = '';
+    const q = buscarInput.value.trim().toLowerCase();
+    if (!q) { ocultar(); return; }
+    const filtrados = PRODUCTOS.filter(function(p) {
+      const texto = (p.nombre + ' ' + p.codigo + ' ' + p.marca).toLowerCase();
+      return texto.includes(q);
+    });
+    mostrarResultados(filtrados);
+  });
+
+  buscarInput.addEventListener('focus', function() {
+    if (buscarInput.value.trim() && !idInput.value) buscarInput.dispatchEvent(new Event('input'));
+  });
+
+  document.addEventListener('mousedown', function(e) {
+    if (!fila.contains(e.target)) ocultar();
+  });
+}
+
+function agregarFila() {
+  const tpl = document.getElementById('filaTemplate');
+  const clone = tpl.content.cloneNode(true);
+  document.getElementById('itemsBody').appendChild(clone);
+  const fila = document.getElementById('itemsBody').lastElementChild;
+  inicializarBuscador(fila);
+  return fila;
+}
+agregarFila();
+
+function toggleProveedorNuevo(checkbox) {
+  const bloque = document.getElementById('bloqueProveedorNuevo');
+  const select = document.getElementById('proveedorSelect');
+  if (!bloque) return;
+  bloque.style.display = checkbox.checked ? '' : 'none';
+  if (select) select.disabled = checkbox.checked;
+  if (!checkbox.checked) {
+    bloque.querySelectorAll('input').forEach(function(i) { i.value = ''; });
+  }
+}
+
+document.getElementById('compraForm').addEventListener('submit', function(e) {
+  const filas = document.querySelectorAll('#itemsBody tr');
+  for (const fila of filas) {
+    const texto = fila.querySelector('.producto-buscar').value.trim();
+    const id = fila.querySelector('.producto-id').value;
+    if (texto && !id) {
+      e.preventDefault();
+      alert('Elegí el producto de la lista que aparece al escribir (no alcanza con tipear el nombre). Revisá la fila: "' + texto + '".');
+      return;
+    }
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Alta rápida de producto (modal), sin perder la compra que se está cargando.
+// Se abre desde el buscador de cualquier fila cuando el producto no existe.
+// ---------------------------------------------------------------------------
+function adivinarCategoria(texto) {
+  const t = (texto || '').toUpperCase();
+  if (t.includes('EMBRAGUE') || t.includes('COLLARIN')) return 'Embragues';
+  if (t.includes('CORREA')) return 'Correas';
+  if (t.includes('LIQUIDO') && t.includes('FRENO')) return 'Líquidos';
+  if (t.includes('FRENO') || t.includes('PASTILLA') || t.includes('CAMPANA') || t.includes('DISCO')) return 'Frenos';
+  return 'Otros';
+}
+
+const subcategoriasPorCategoria = {{ subcategorias_json|tojson }};
+
+function actualizarSubcategoriasModal() {
+  const categoria = document.getElementById('npCategoria').value;
+  const select = document.getElementById('npSubcategoria');
+  const opciones = subcategoriasPorCategoria[categoria] || [];
+  select.innerHTML = '<option value="">-- Sin especificar --</option>';
+  opciones.forEach(function(nombre) {
+    const opt = document.createElement('option');
+    opt.value = nombre;
+    opt.textContent = nombre;
+    select.appendChild(opt);
+  });
+}
+document.getElementById('npCategoria').addEventListener('change', actualizarSubcategoriasModal);
+
+const modalNuevoProducto = new bootstrap.Modal(document.getElementById('modalNuevoProducto'));
+let filaParaNuevoProducto = null;
+
+function abrirModalNuevoProducto(fila, nombreSugerido, codigoSugerido, costoSugerido) {
+  filaParaNuevoProducto = fila;
+  document.getElementById('nuevoProductoError').classList.add('d-none');
+  document.getElementById('npNombre').value = nombreSugerido || '';
+  document.getElementById('npCodigo').value = codigoSugerido || '';
+  document.getElementById('npCategoria').value = adivinarCategoria(nombreSugerido);
+  actualizarSubcategoriasModal();
+  document.getElementById('npMarca').value = '';
+  document.getElementById('npStockMinimo').value = 2;
+  const costo = parseFloat(costoSugerido) || 0;
+  document.getElementById('npPrecioCosto').value = costo || '';
+  document.getElementById('npPrecioVenta').value = costo ? Math.round(costo * 1.3 * 100) / 100 : '';
+  modalNuevoProducto.show();
+}
+
+document.getElementById('btnGuardarProducto').addEventListener('click', function() {
+  const nombre = document.getElementById('npNombre').value.trim();
+  const errorBox = document.getElementById('nuevoProductoError');
+  errorBox.classList.add('d-none');
+
+  if (!nombre) {
+    errorBox.textContent = 'El nombre es obligatorio.';
+    errorBox.classList.remove('d-none');
+    return;
+  }
+
+  const proveedorSelect = document.getElementById('proveedorSelect');
+  const datos = new FormData();
+  datos.append('nombre', nombre);
+  datos.append('codigo', document.getElementById('npCodigo').value.trim());
+  datos.append('categoria', document.getElementById('npCategoria').value);
+  datos.append('subcategoria', document.getElementById('npSubcategoria').value);
+  datos.append('marca', document.getElementById('npMarca').value.trim());
+  datos.append('stock_minimo', document.getElementById('npStockMinimo').value || 2);
+  datos.append('precio_costo', document.getElementById('npPrecioCosto').value || 0);
+  datos.append('precio_venta', document.getElementById('npPrecioVenta').value || 0);
+  if (proveedorSelect && !proveedorSelect.disabled && proveedorSelect.value) {
+    datos.append('proveedor_id', proveedorSelect.value);
+  }
+
+  fetch('/api/productos-nuevo', { method: 'POST', body: datos })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (!data.ok) {
+        errorBox.textContent = data.error || 'No se pudo crear el producto.';
+        errorBox.classList.remove('d-none');
+        return;
+      }
+      PRODUCTOS.push(data);
+      if (filaParaNuevoProducto) {
+        filaParaNuevoProducto.querySelector('.producto-id').value = data.id;
+        filaParaNuevoProducto.querySelector('.producto-buscar').value = data.nombre + ' (' + (data.codigo || 's/código') + ')';
+        const costoInput = filaParaNuevoProducto.querySelector('input[name="precio_unitario"]');
+        if (costoInput && !costoInput.value) costoInput.value = data.precio_costo;
+      }
+      modalNuevoProducto.hide();
+    })
+    .catch(function() {
+      errorBox.textContent = 'Hubo un problema de conexión. Intentá de nuevo.';
+      errorBox.classList.remove('d-none');
+    });
+});
+</script>
+{% endblock %}

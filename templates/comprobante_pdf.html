@@ -1,0 +1,102 @@
+<html>
+<head>
+<style>
+  @page { size: A4; margin: 2cm; }
+  body { font-family: Helvetica, Arial, sans-serif; font-size: 10pt; color: #222222; }
+  .header-table { width: 100%; border-collapse: collapse; margin-bottom: 14px; padding-bottom: 10px; border-bottom: 3px solid #f2b705; }
+  .header-table td { vertical-align: top; padding: 0; }
+  .negocio-nombre { font-size: 14pt; font-weight: bold; color: #111111; }
+  .muted { color: #666666; font-size: 8.5pt; }
+  .text-end { text-align: right; }
+  .comprobante-tipo { font-size: 12pt; font-weight: bold; }
+  .datos-table { width: 100%; border-collapse: collapse; margin-bottom: 14px; }
+  .datos-table td { vertical-align: top; padding: 0; }
+  .seccion-titulo { font-size: 9pt; font-weight: bold; text-transform: uppercase; color: #444444; margin-bottom: 3px; }
+  table.items { width: 100%; border-collapse: collapse; margin-top: 6px; }
+  table.items th { background-color: #111111; color: #ffffff; padding: 6px 8px; font-size: 8.5pt; text-transform: uppercase; text-align: left; }
+  table.items td { padding: 6px 8px; border-bottom: 1px solid #dddddd; font-size: 9.5pt; }
+  .total-row td { font-weight: bold; font-size: 11pt; border-top: 2px solid #111111; border-bottom: none; padding-top: 8px; }
+  .aviso { margin-top: 16px; padding: 8px 10px; background-color: #fff3cd; color: #664d03; font-size: 8.5pt; }
+  .aviso-ok { margin-top: 16px; padding: 8px 10px; background-color: #d1e7dd; color: #0a3622; font-size: 8.5pt; }
+  .cae-table { width: 100%; margin-top: 14px; }
+  .cae-table td { vertical-align: top; padding: 0; }
+</style>
+</head>
+<body>
+
+  <table class="header-table">
+    <tr>
+      <td style="width: 90px;"><img src="static/img/logo_icon_soft.png" width="70" height="70"/></td>
+      <td>
+        <div class="negocio-nombre">{{ negocio.nombre }}</div>
+        <div class="muted">{{ negocio.subtitulo }}</div>
+        <div class="muted">{{ negocio.direccion }}</div>
+        <div class="muted">WhatsApp: {{ negocio.telefono }} &nbsp;·&nbsp; CUIT: {{ negocio.cuit }}</div>
+      </td>
+      <td class="text-end" style="width: 180px;">
+        <div class="comprobante-tipo">{{ venta.tipo_comprobante }} N&deg; {{ venta.numero_comprobante }}</div>
+        <div class="muted">Fecha: {{ venta.fecha }}</div>
+      </td>
+    </tr>
+  </table>
+
+  <table class="datos-table">
+    <tr>
+      <td style="width: 60%;">
+        <div class="seccion-titulo">Cliente</div>
+        <div>{{ venta.cliente_nombre or 'Consumidor final' }}</div>
+        {% if venta.cliente_telefono %}<div class="muted">Tel: {{ venta.cliente_telefono }}</div>{% endif %}
+        {% if venta.cliente_direccion %}<div class="muted">{{ venta.cliente_direccion }}</div>{% endif %}
+        {% if venta.cliente_cuit %}<div class="muted">CUIT/DNI: {{ venta.cliente_cuit }}</div>{% endif %}
+      </td>
+      <td class="text-end">
+        <div class="seccion-titulo">M&eacute;todo de pago</div>
+        <div>{{ venta.metodo_pago }}</div>
+      </td>
+    </tr>
+  </table>
+
+  <table class="items">
+    <thead>
+      <tr><th>C&oacute;digo</th><th>Producto</th><th class="text-end">Cant.</th><th class="text-end">Precio unit.</th><th class="text-end">Subtotal</th></tr>
+    </thead>
+    <tbody>
+    {% for it in items %}
+      <tr>
+        <td>{{ it.producto_codigo }}</td>
+        <td>{{ it.producto_nombre }}</td>
+        <td class="text-end">{{ it.cantidad }}</td>
+        <td class="text-end">{{ it.precio_unitario|money }}</td>
+        <td class="text-end">{{ it.subtotal|money }}</td>
+      </tr>
+    {% endfor %}
+      <tr class="total-row">
+        <td colspan="4" class="text-end">Total</td>
+        <td class="text-end">{{ venta.total|money }}</td>
+      </tr>
+    </tbody>
+  </table>
+
+  {% if venta.tipo_comprobante == "Factura C" and venta.cae %}
+    <div class="aviso-ok">Factura C electr&oacute;nica autorizada por ARCA. CAE {{ venta.cae }} &middot; vence {{ venta.cae_vencimiento }}.</div>
+    <table class="cae-table">
+      <tr>
+        <td style="width: 70%;">
+          <div class="muted">Punto de venta / N&deg; de comprobante</div>
+          <div>{{ "%04d"|format(venta.punto_venta_arca) }}-{{ "%08d"|format(venta.numero_factura_arca) }}</div>
+        </td>
+        {% if qr_url %}
+        <td class="text-end">
+          <img src="https://api.qrserver.com/v1/create-qr-code/?size=140x140&data={{ qr_url|urlencode }}" width="140" height="140"/>
+        </td>
+        {% endif %}
+      </tr>
+    </table>
+  {% elif venta.tipo_comprobante == "Factura C" %}
+    <div class="aviso">Esta venta deber&iacute;a tener una Factura C autorizada por ARCA, pero todav&iacute;a no se emiti&oacute;.</div>
+  {% else %}
+    <div class="aviso">Este es un {{ venta.tipo_comprobante }} interno del negocio, no reemplaza una factura fiscal de AFIP.</div>
+  {% endif %}
+
+</body>
+</html>

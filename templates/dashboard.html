@@ -1,0 +1,122 @@
+{% extends "base.html" %}
+{% block title %}Panel | Frenos & Embragues{% endblock %}
+{% block content %}
+
+<div class="row g-3 mb-4">
+  <div class="col-md-3">
+    <div class="stat-card stat-dark">
+      <div class="small">Ventas del mes</div>
+      <h3>{{ ventas_mes|money }}</h3>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="stat-card stat-gold">
+      <div class="small">Ventas históricas</div>
+      <h3>{{ total_ventas_hist|money }}</h3>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="stat-card stat-gray">
+      <div class="small">Clientes</div>
+      <h3>{{ cant_clientes }}</h3>
+    </div>
+  </div>
+  <div class="col-md-3">
+    <div class="stat-card stat-gold-dark">
+      <div class="small">Productos en catálogo</div>
+      <h3>{{ cant_productos }}</h3>
+    </div>
+  </div>
+</div>
+
+<div class="row g-3 mb-4">
+  <div class="col-lg-8">
+    <div class="card p-3 h-100">
+      <h5 class="mb-3">Ventas por mes</h5>
+      <canvas id="ventasChart" height="110"></canvas>
+    </div>
+  </div>
+  <div class="col-lg-4">
+    <div class="card p-3 h-100">
+      <h5 class="mb-3">Top clientes</h5>
+      {% if top_clientes %}
+      <table class="table table-sm mb-0">
+        <thead><tr><th>Cliente</th><th class="text-end">Compras</th><th class="text-end">Total</th></tr></thead>
+        <tbody>
+        {% for c in top_clientes %}
+          <tr><td>{{ c.nombre }}</td><td class="text-end">{{ c.cant_compras }}</td><td class="text-end">{{ c.total|money }}</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+        <p class="text-muted mb-0">Todavía no hay ventas registradas.</p>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+<div class="row g-3">
+  <div class="col-lg-6">
+    <div class="card p-3 h-100">
+      <h5 class="mb-3">Productos más vendidos</h5>
+      {% if top_productos %}
+      <table class="table table-sm mb-0">
+        <thead><tr><th>Producto</th><th class="text-end">Unidades</th><th class="text-end">Total</th></tr></thead>
+        <tbody>
+        {% for p in top_productos %}
+          <tr><td>{{ p.nombre }}</td><td class="text-end">{{ p.cantidad }}</td><td class="text-end">{{ p.total|money }}</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+        <p class="text-muted mb-0">Todavía no hay ventas registradas.</p>
+      {% endif %}
+    </div>
+  </div>
+  <div class="col-lg-6">
+    <div class="card p-3 h-100">
+      <h5 class="mb-3"><i class="bi bi-exclamation-triangle-fill text-warning"></i> Stock bajo (reponer)</h5>
+      {% if stock_bajo %}
+      <table class="table table-sm mb-0">
+        <thead><tr><th>Producto</th><th class="text-end">Stock</th><th class="text-end">Mínimo</th></tr></thead>
+        <tbody>
+        {% for p in stock_bajo %}
+          <tr class="low-stock"><td>{{ p.nombre }} <span class="text-muted">({{ p.codigo }})</span></td><td class="text-end">{{ p.stock_actual }}</td><td class="text-end">{{ p.stock_minimo }}</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+      {% else %}
+        <p class="text-muted mb-0">Todo el stock está en niveles saludables.</p>
+      {% endif %}
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.4/dist/chart.umd.min.js"></script>
+<script>
+new Chart(document.getElementById('ventasChart'), {
+  type: 'bar',
+  data: {
+    labels: {{ meses|tojson }},
+    datasets: [{
+      label: 'Ventas ($)',
+      data: {{ ventas_por_mes|tojson }},
+      backgroundColor: '#f2b705',
+      hoverBackgroundColor: '#caa100',
+      borderRadius: 4,
+      borderSkipped: false
+    }]
+  },
+  options: {
+    plugins: { legend: { display: false } },
+    scales: {
+      y: { beginAtZero: true, grid: { color: '#e5e5e5' }, ticks: { color: '#4b4b4b' } },
+      x: { grid: { display: false }, ticks: { color: '#4b4b4b' } }
+    }
+  }
+});
+</script>
+{% endblock %}

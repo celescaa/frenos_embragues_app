@@ -1,0 +1,428 @@
+{% extends "base.html" %}
+{% block title %}Revisar factura | Frenos & Embragues{% endblock %}
+{% block content %}
+<h4 class="mb-1"><i class="bi bi-clipboard-check"></i> Revisar factura antes de cargar</h4>
+<p class="text-muted">Archivo: <strong>{{ nombre_archivo }}</strong></p>
+
+{% if resultado.avisos %}
+  {% for aviso in resultado.avisos %}
+    <div class="alert alert-warning"><i class="bi bi-exclamation-triangle"></i> {{ aviso }}</div>
+  {% endfor %}
+{% endif %}
+
+<div class="alert alert-info">
+  <i class="bi bi-info-circle"></i> Revisá cada línea. Las marcadas en amarillo o rojo no se pudieron
+  matchear con confianza contra tu catálogo — elegí el producto correcto (o dejalas sin marcar para
+  que no se carguen). Solo se registran las líneas con el check "Cargar" tildado.
+</div>
+
+<form method="post" action="{{ url_for('compras_nueva') }}" id="compraForm">
+  <div class="card p-4 mb-3">
+    <div class="row">
+      <div class="col-md-6 mb-3">
+        <label class="form-label">Proveedor</label>
+        <select name="proveedor_id" id="proveedorSelect" class="form-select" {{ "disabled" if not resultado.proveedor_id_detectado and resultado.proveedor_candidato else "" }}>
+          <option value="">-- Elegir proveedor --</option>
+          {% for p in proveedores %}
+            <option value="{{ p.id }}" {{ "selected" if resultado.proveedor_id_detectado == p.id else "" }}>{{ p.nombre }}</option>
+          {% endfor %}
+        </select>
+        {% if not resultado.proveedor_id_detectado %}
+          <div class="form-text text-warning">No reconocí este proveedor entre los que ya tenés cargados.</div>
+          <div class="form-check form-check-inline mt-1">
+            <input class="form-check-input" type="checkbox" id="toggleProveedorNuevo" {{ "checked" if resultado.proveedor_candidato else "" }} onchange="toggleProveedorNuevo(this)">
+            <label class="form-check-label small" for="toggleProveedorNuevo">Crear proveedor nuevo con los datos de la factura</label>
+          </div>
+        {% endif %}
+      </div>
+      <div class="col-md-6 mb-3">
+        <label class="form-label">N° de factura del proveedor</label>
+        <input type="text" name="numero_factura_proveedor" class="form-control" value="{{ resultado.numero_factura_detectado or '' }}">
+      </div>
+    </div>
+
+    {% if not resultado.proveedor_id_detectado %}
+      <div id="bloqueProveedorNuevo" class="row border-top pt-3 mt-2" style="{{ '' if resultado.proveedor_candidato else 'display:none;' }}">
+        <div class="col-12 mb-2 text-muted small">
+          <i class="bi bi-magic"></i> Datos tomados de la factura — revisalos antes de confirmar.
+        </div>
+        <div class="col-md-6 mb-3">
+          <label class="form-label">Nombre del proveedor nuevo</label>
+          <input type="text" name="proveedor_nuevo_nombre" class="form-control"
+                 value="{{ (resultado.proveedor_candidato.nombre or '') if resultado.proveedor_candidato else '' }}">
+        </div>
+        <div class="col-md-6 mb-3">
+          <label class="form-label">CUIT</label>
+          <input type="text" name="proveedor_nuevo_cuit" class="form-control"
+                 value="{{ (resultado.proveedor_candidato.cuit or '') if resultado.proveedor_candidato else '' }}">
+        </div>
+        <div class="col-md-6 mb-3">
+          <label class="form-label">Email</label>
+          <input type="email" name="proveedor_nuevo_email" class="form-control"
+                 value="{{ (resultado.proveedor_candidato.email or '') if resultado.proveedor_candidato else '' }}">
+        </div>
+        <div class="col-md-6 mb-3">
+          <label class="form-label">Teléfono</label>
+          <input type="text" name="proveedor_nuevo_telefono" class="form-control">
+        </div>
+      </div>
+    {% endif %}
+  </div>
+
+  <div class="card p-4 mb-3">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <h6 class="mb-0">Productos reconocidos ({{ resultado.filas|length }})</h6>
+      <button type="button" class="btn btn-sm btn-outline-primary" onclick="agregarFila()"><i class="bi bi-plus-lg"></i> Agregar línea</button>
+    </div>
+    <table class="table align-middle" id="itemsTable">
+      <thead>
+        <tr>
+          <th style="width:40px;">Cargar</th>
+          <th style="width:38%;">Producto</th>
+          <th style="width:110px;">Cantidad</th>
+          <th style="width:140px;">Costo unit.</th>
+          <th style="width:90px;">Match</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="itemsBody">
+        {% for f in resultado.filas %}
+          {% set confianza_badge = {"codigo": ("success", "código"), "texto": ("warning", "por texto"), "sin_match": ("danger", "sin match")}[f.confianza] %}
+          <tr class="fila-item" data-descripcion-factura="{{ f.descripcion_factura }}" data-codigo-factura="{{ f.codigo_factura or '' }}">
+            <td class="text-center">
+              <input type="checkbox" class="form-check-input fila-check" {{ "checked" if f.confianza != "sin_match" else "" }}>
+            </td>
+            <td>
+              <div class="position-relative">
+                <input type="text" class="form-control producto-buscar" autocomplete="off" required
+                       value="{{ (f.producto_nombre_sugerido + ' (' + (f.codigo_factura or 'match por texto') + ')') if f.producto_id_sugerido else '' }}"
+                       placeholder="Buscar por nombre, código o marca...">
+                <input type="hidden" name="producto_id" class="producto-id" value="{{ f.producto_id_sugerido or '' }}">
+                <div class="list-group producto-resultados position-absolute w-100 shadow" style="z-index: 1050; max-height: 260px; overflow-y: auto; display: none;"></div>
+              </div>
+              <div class="text-muted small mt-1">Factura: "{{ f.descripcion_factura }}"{% if f.codigo_factura %} · cód. {{ f.codigo_factura }}{% endif %}</div>
+            </td>
+            <td><input type="number" name="cantidad" min="1" step="1" value="{{ (f.cantidad|int) if f.cantidad else 1 }}" class="form-control" required></td>
+            <td><input type="number" step="0.01" name="precio_unitario" value="{{ f.precio_unitario }}" class="form-control" required></td>
+            <td><span class="badge bg-{{ confianza_badge[0] }}">{{ confianza_badge[1] }}</span></td>
+            <td><button type="button" class="btn btn-sm btn-outline-danger" onclick="this.closest('tr').remove()"><i class="bi bi-trash"></i></button></td>
+          </tr>
+        {% endfor %}
+      </tbody>
+    </table>
+  </div>
+
+  <button type="submit" class="btn btn-primary">Confirmar y registrar compra</button>
+  <a href="{{ url_for('compras_importar_factura') }}" class="btn btn-link">Probar con otro archivo</a>
+</form>
+
+<template id="filaTemplate">
+  <tr class="fila-item">
+    <td class="text-center"><input type="checkbox" class="form-check-input fila-check" checked></td>
+    <td>
+      <div class="position-relative">
+        <input type="text" class="form-control producto-buscar" autocomplete="off" required
+               placeholder="Buscar por nombre, código o marca...">
+        <input type="hidden" name="producto_id" class="producto-id">
+        <div class="list-group producto-resultados position-absolute w-100 shadow" style="z-index: 1050; max-height: 260px; overflow-y: auto; display: none;"></div>
+      </div>
+    </td>
+    <td><input type="number" name="cantidad" min="1" value="1" class="form-control" required></td>
+    <td><input type="number" step="0.01" name="precio_unitario" class="form-control" required></td>
+    <td><span class="badge bg-secondary">manual</span></td>
+    <td><button type="button" class="btn btn-sm btn-outline-danger" onclick="this.closest('tr').remove()"><i class="bi bi-trash"></i></button></td>
+  </tr>
+</template>
+
+<div class="modal fade" id="modalNuevoProducto" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-box-seam"></i> Nuevo producto</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div id="nuevoProductoError" class="alert alert-danger py-2 d-none"></div>
+        <div class="mb-3">
+          <label class="form-label">Nombre *</label>
+          <input type="text" id="npNombre" class="form-control" required>
+        </div>
+        <div class="row">
+          <div class="col-md-6 mb-3">
+            <label class="form-label">Código interno</label>
+            <input type="text" id="npCodigo" class="form-control" placeholder="Opcional">
+          </div>
+          <div class="col-md-6 mb-3">
+            <label class="form-label">Categoría</label>
+            <select id="npCategoria" class="form-select">
+              {% for c in categorias %}
+                <option value="{{ c }}">{{ c }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </div>
+        <div class="row">
+          <div class="col-md-6 mb-3">
+            <label class="form-label">Subcategoría</label>
+            <select id="npSubcategoria" class="form-select">
+              <option value="">-- Sin especificar --</option>
+            </select>
+          </div>
+          <div class="col-md-6 mb-3">
+            <label class="form-label">Marca</label>
+            <input type="text" id="npMarca" class="form-control">
+          </div>
+        </div>
+        <div class="row">
+          <div class="col-md-6 mb-3">
+            <label class="form-label">Stock mínimo</label>
+            <input type="number" id="npStockMinimo" class="form-control" value="2" min="0">
+          </div>
+        </div>
+        <div class="row">
+          <div class="col-md-6 mb-3">
+            <label class="form-label">Precio costo</label>
+            <input type="number" step="0.01" id="npPrecioCosto" class="form-control">
+          </div>
+          <div class="col-md-6 mb-3">
+            <label class="form-label">Precio de venta sugerido</label>
+            <input type="number" step="0.01" id="npPrecioVenta" class="form-control">
+          </div>
+        </div>
+        <div class="form-text">Arranca con stock 0 — esta misma compra le suma la cantidad que cargues en la fila.</div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-link" data-bs-dismiss="modal">Cancelar</button>
+        <button type="button" class="btn btn-primary" id="btnGuardarProducto">Guardar y usar en esta compra</button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const PRODUCTOS = {{ productos_json|tojson }};
+
+// Mismo buscador tipo autocompletar que en Nueva compra / Nueva venta.
+function inicializarBuscador(fila) {
+  const buscarInput = fila.querySelector('.producto-buscar');
+  const idInput = fila.querySelector('.producto-id');
+  const resultados = fila.querySelector('.producto-resultados');
+  const costoInput = fila.querySelector('input[name="precio_unitario"]');
+
+  function ocultar() { resultados.style.display = 'none'; resultados.innerHTML = ''; }
+
+  function mostrarResultados(lista) {
+    resultados.innerHTML = '';
+    if (lista.length === 0) {
+      const vacio = document.createElement('div');
+      vacio.className = 'list-group-item text-muted small';
+      vacio.textContent = 'No hay productos que coincidan.';
+      resultados.appendChild(vacio);
+    }
+    lista.slice(0, 8).forEach(function(p) {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'list-group-item list-group-item-action py-2';
+      item.innerHTML = '<div class="d-flex justify-content-between align-items-center">' +
+        '<span>' + p.nombre + ' <span class="text-muted small">(' + (p.codigo || 's/código') + (p.marca ? ' · ' + p.marca : '') + ')</span></span>' +
+        '<span class="text-muted small">stock actual: ' + p.stock_actual + '</span></div>';
+      item.addEventListener('mousedown', function(e) {
+        e.preventDefault();
+        idInput.value = p.id;
+        buscarInput.value = p.nombre + ' (' + (p.codigo || 's/código') + ')';
+        if (!costoInput.value) costoInput.value = p.precio_costo;
+        ocultar();
+      });
+      resultados.appendChild(item);
+    });
+    const crearNuevo = document.createElement('button');
+    crearNuevo.type = 'button';
+    crearNuevo.className = 'list-group-item list-group-item-action py-2 text-primary';
+    const sugerido = buscarInput.value.trim() || fila.dataset.descripcionFactura || '';
+    crearNuevo.innerHTML = '<i class="bi bi-plus-lg"></i> Crear producto nuevo' + (sugerido ? ' "' + sugerido + '"' : '');
+    crearNuevo.addEventListener('mousedown', function(e) {
+      e.preventDefault();
+      ocultar();
+      abrirModalNuevoProducto(fila, sugerido, fila.dataset.codigoFactura || null, costoInput.value);
+    });
+    resultados.appendChild(crearNuevo);
+    resultados.style.display = 'block';
+  }
+
+  function buscarConQuery(q) {
+    q = (q || '').trim().toLowerCase();
+    if (!q) { ocultar(); return; }
+    const filtrados = PRODUCTOS.filter(function(p) {
+      const texto = (p.nombre + ' ' + p.codigo + ' ' + p.marca).toLowerCase();
+      return texto.includes(q);
+    });
+    mostrarResultados(filtrados);
+  }
+
+  buscarInput.addEventListener('input', function() {
+    idInput.value = '';
+    buscarConQuery(buscarInput.value);
+  });
+
+  buscarInput.addEventListener('focus', function() {
+    if (idInput.value) return;
+    // si la fila viene de una factura sin match, al enfocar (aunque el
+    // campo esté vacío) igual se muestra algo — como mínimo la opción de
+    // crear el producto — usando la descripción de la factura como pista.
+    buscarConQuery(buscarInput.value || fila.dataset.descripcionFactura || '');
+  });
+
+  document.addEventListener('mousedown', function(e) {
+    if (!fila.contains(e.target)) ocultar();
+  });
+}
+
+document.querySelectorAll('#itemsBody tr').forEach(inicializarBuscador);
+
+function toggleProveedorNuevo(checkbox) {
+  const bloque = document.getElementById('bloqueProveedorNuevo');
+  const select = document.getElementById('proveedorSelect');
+  if (!bloque) return;
+  bloque.style.display = checkbox.checked ? '' : 'none';
+  if (select) select.disabled = checkbox.checked;
+  if (!checkbox.checked) {
+    bloque.querySelectorAll('input').forEach(function(i) { i.value = ''; });
+  }
+}
+
+function agregarFila() {
+  const tpl = document.getElementById('filaTemplate');
+  const clone = tpl.content.cloneNode(true);
+  document.getElementById('itemsBody').appendChild(clone);
+  const fila = document.getElementById('itemsBody').lastElementChild;
+  inicializarBuscador(fila);
+  return fila;
+}
+
+document.getElementById('compraForm').addEventListener('submit', function(e) {
+  const filas = document.querySelectorAll('#itemsBody tr');
+  for (const fila of filas) {
+    const marcada = fila.querySelector('.fila-check').checked;
+    const campos = fila.querySelectorAll('input[name]');
+    if (!marcada) {
+      // línea no confirmada: se saca del envío sin borrar la fila (por si se
+      // quiere tildar después de corregirla)
+      campos.forEach(function(c) { c.disabled = true; });
+      continue;
+    }
+    campos.forEach(function(c) { c.disabled = false; });
+    const texto = fila.querySelector('.producto-buscar').value.trim();
+    const id = fila.querySelector('.producto-id').value;
+    if (texto && !id) {
+      e.preventDefault();
+      alert('Elegí el producto de la lista que aparece al escribir (no alcanza con tipear el nombre). Revisá la fila: "' + texto + '".');
+      return;
+    }
+    if (!texto) {
+      e.preventDefault();
+      alert('Hay una línea marcada para cargar sin producto elegido. Elegí un producto o destildá el check "Cargar".');
+      return;
+    }
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Alta rápida de producto (modal), sin perder la revisión de la factura.
+// Se abre desde el buscador de cualquier fila cuando el producto no existe.
+// ---------------------------------------------------------------------------
+function adivinarCategoria(texto) {
+  const t = (texto || '').toUpperCase();
+  if (t.includes('EMBRAGUE') || t.includes('COLLARIN')) return 'Embragues';
+  if (t.includes('CORREA')) return 'Correas';
+  if (t.includes('LIQUIDO') && t.includes('FRENO')) return 'Líquidos';
+  if (t.includes('FRENO') || t.includes('PASTILLA') || t.includes('CAMPANA') || t.includes('DISCO')) return 'Frenos';
+  return 'Otros';
+}
+
+const subcategoriasPorCategoria = {{ subcategorias_json|tojson }};
+
+function actualizarSubcategoriasModal() {
+  const categoria = document.getElementById('npCategoria').value;
+  const select = document.getElementById('npSubcategoria');
+  const opciones = subcategoriasPorCategoria[categoria] || [];
+  select.innerHTML = '<option value="">-- Sin especificar --</option>';
+  opciones.forEach(function(nombre) {
+    const opt = document.createElement('option');
+    opt.value = nombre;
+    opt.textContent = nombre;
+    select.appendChild(opt);
+  });
+}
+document.getElementById('npCategoria').addEventListener('change', actualizarSubcategoriasModal);
+
+const modalNuevoProducto = new bootstrap.Modal(document.getElementById('modalNuevoProducto'));
+let filaParaNuevoProducto = null;
+
+function abrirModalNuevoProducto(fila, nombreSugerido, codigoSugerido, costoSugerido) {
+  filaParaNuevoProducto = fila;
+  document.getElementById('nuevoProductoError').classList.add('d-none');
+  document.getElementById('npNombre').value = nombreSugerido || '';
+  document.getElementById('npCodigo').value = codigoSugerido || '';
+  document.getElementById('npCategoria').value = adivinarCategoria(nombreSugerido);
+  actualizarSubcategoriasModal();
+  document.getElementById('npMarca').value = '';
+  document.getElementById('npStockMinimo').value = 2;
+  const costo = parseFloat(costoSugerido) || 0;
+  document.getElementById('npPrecioCosto').value = costo || '';
+  document.getElementById('npPrecioVenta').value = costo ? Math.round(costo * 1.3 * 100) / 100 : '';
+  modalNuevoProducto.show();
+}
+
+document.getElementById('btnGuardarProducto').addEventListener('click', function() {
+  const nombre = document.getElementById('npNombre').value.trim();
+  const errorBox = document.getElementById('nuevoProductoError');
+  errorBox.classList.add('d-none');
+
+  if (!nombre) {
+    errorBox.textContent = 'El nombre es obligatorio.';
+    errorBox.classList.remove('d-none');
+    return;
+  }
+
+  const proveedorSelect = document.getElementById('proveedorSelect');
+  const datos = new FormData();
+  datos.append('nombre', nombre);
+  datos.append('codigo', document.getElementById('npCodigo').value.trim());
+  datos.append('categoria', document.getElementById('npCategoria').value);
+  datos.append('subcategoria', document.getElementById('npSubcategoria').value);
+  datos.append('marca', document.getElementById('npMarca').value.trim());
+  datos.append('stock_minimo', document.getElementById('npStockMinimo').value || 2);
+  datos.append('precio_costo', document.getElementById('npPrecioCosto').value || 0);
+  datos.append('precio_venta', document.getElementById('npPrecioVenta').value || 0);
+  if (proveedorSelect && !proveedorSelect.disabled && proveedorSelect.value) {
+    datos.append('proveedor_id', proveedorSelect.value);
+  }
+
+  fetch('/api/productos-nuevo', { method: 'POST', body: datos })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (!data.ok) {
+        errorBox.textContent = data.error || 'No se pudo crear el producto.';
+        errorBox.classList.remove('d-none');
+        return;
+      }
+      PRODUCTOS.push(data);
+      if (filaParaNuevoProducto) {
+        filaParaNuevoProducto.querySelector('.producto-id').value = data.id;
+        filaParaNuevoProducto.querySelector('.producto-buscar').value = data.nombre + ' (' + (data.codigo || 's/código') + ')';
+        const costoInput = filaParaNuevoProducto.querySelector('input[name="precio_unitario"]');
+        if (costoInput && !costoInput.value) costoInput.value = data.precio_costo;
+        const check = filaParaNuevoProducto.querySelector('.fila-check');
+        if (check) check.checked = true;
+      }
+      modalNuevoProducto.hide();
+    })
+    .catch(function() {
+      errorBox.textContent = 'Hubo un problema de conexión. Intentá de nuevo.';
+      errorBox.classList.remove('d-none');
+    });
+});
+</script>
+{% endblock %}

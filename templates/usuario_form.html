@@ -1,0 +1,46 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Editar usuario' if usuario else 'Nuevo usuario' }}{% endblock %}
+{% block content %}
+<h4 class="mb-3">{{ 'Editar usuario' if usuario else 'Nuevo usuario' }}</h4>
+<div class="card p-4" style="max-width: 560px;">
+  <form method="post">
+    {% if not usuario %}
+      <div class="mb-3">
+        <label class="form-label">Usuario (para iniciar sesión) *</label>
+        <input type="text" name="username" class="form-control" required autocomplete="off">
+        <div class="form-text">No se puede cambiar después de creado.</div>
+      </div>
+    {% else %}
+      <div class="mb-3">
+        <label class="form-label">Usuario</label>
+        <input type="text" class="form-control" value="{{ usuario.username }}" disabled>
+      </div>
+    {% endif %}
+    <div class="mb-3">
+      <label class="form-label">Nombre completo *</label>
+      <input type="text" name="nombre" class="form-control" required value="{{ usuario.nombre if usuario else '' }}">
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Rol</label>
+      <select name="rol" class="form-select">
+        <option value="empleado" {{ 'selected' if usuario and usuario.rol == 'empleado' else '' }}>Empleado</option>
+        <option value="admin" {{ 'selected' if usuario and usuario.rol == 'admin' else '' }}>Administrador</option>
+      </select>
+      <div class="form-text">Los administradores pueden gestionar otros usuarios; los empleados no.</div>
+    </div>
+    {% if usuario %}
+      <div class="form-check mb-3">
+        <input type="checkbox" name="activo" id="activo" class="form-check-input" {{ 'checked' if usuario.activo else '' }}>
+        <label for="activo" class="form-check-label">Usuario activo (puede iniciar sesión)</label>
+      </div>
+    {% else %}
+      <div class="alert alert-info small">
+        Se va a generar una contraseña temporal que se muestra una sola vez al guardar.
+        El usuario la va a tener que cambiar en su primer ingreso.
+      </div>
+    {% endif %}
+    <button type="submit" class="btn btn-primary">Guardar</button>
+    <a href="{{ url_for('usuarios_lista') }}" class="btn btn-link">Cancelar</a>
+  </form>
+</div>
+{% endblock %}

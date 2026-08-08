@@ -1,0 +1,48 @@
+{% extends "base_publica.html" %}
+{% block title %}Carrito | {{ negocio.nombre }}{% endblock %}
+{% block content %}
+
+<h4 class="mb-3"><i class="bi bi-cart3"></i> Tu carrito</h4>
+
+{% if not items %}
+  <div class="alert alert-info">
+    Todavía no agregaste productos. <a href="{{ url_for('tienda_catalogo') }}">Ver catálogo</a>.
+  </div>
+{% else %}
+  <div class="card p-3 mb-3">
+    <table class="table align-middle mb-0">
+      <thead><tr><th>Producto</th><th class="text-end">Precio unit.</th><th style="width:110px;">Cantidad</th><th class="text-end">Subtotal</th><th></th></tr></thead>
+      <tbody>
+      {% for it in items %}
+        <tr>
+          <td>{{ it.nombre }} <span class="text-muted small">({{ it.codigo or 's/código' }})</span></td>
+          <td class="text-end">{{ it.precio_unitario|money }}</td>
+          <td>
+            <form method="post" action="{{ url_for('tienda_carrito_actualizar') }}" class="d-flex gap-1">
+              <input type="hidden" name="producto_id" value="{{ it.producto_id }}">
+              <input type="number" name="cantidad" value="{{ it.cantidad }}" min="1" max="{{ it.stock_actual }}" class="form-control form-control-sm" onchange="this.form.submit()">
+            </form>
+          </td>
+          <td class="text-end">{{ it.subtotal|money }}</td>
+          <td class="text-end">
+            <form method="post" action="{{ url_for('tienda_carrito_quitar') }}">
+              <input type="hidden" name="producto_id" value="{{ it.producto_id }}">
+              <button type="submit" class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>
+            </form>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+      <tfoot>
+        <tr><th colspan="3" class="text-end">Total</th><th class="text-end">{{ total|money }}</th><th></th></tr>
+      </tfoot>
+    </table>
+  </div>
+
+  <div class="d-flex justify-content-between">
+    <a href="{{ url_for('tienda_catalogo') }}" class="btn btn-link"><i class="bi bi-arrow-left"></i> Seguir comprando</a>
+    <a href="{{ url_for('tienda_checkout') }}" class="btn btn-primary">Continuar con la compra <i class="bi bi-arrow-right"></i></a>
+  </div>
+{% endif %}
+
+{% endblock %}

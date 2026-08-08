@@ -1,0 +1,349 @@
+{% extends "base.html" %}
+{% block title %}Nueva venta{% endblock %}
+{% block content %}
+<h4 class="mb-3"><i class="bi bi-cash-coin"></i> Nueva venta</h4>
+
+<form method="post" id="ventaForm">
+  <div class="card p-4 mb-3">
+    <div class="row">
+      <div class="col-md-5 mb-3">
+        <label class="form-label">Cliente</label>
+        <div class="d-flex gap-2">
+          <select name="cliente_id" id="clienteSelect" class="form-select">
+            <option value="">Consumidor final</option>
+            {% for c in clientes %}
+              <option value="{{ c.id }}">{{ c.nombre }}</option>
+            {% endfor %}
+          </select>
+          <button type="button" class="btn btn-outline-primary flex-shrink-0" data-bs-toggle="modal" data-bs-target="#modalNuevoCliente" title="Cargar un cliente nuevo sin perder esta venta">
+            <i class="bi bi-person-plus"></i>
+          </button>
+        </div>
+      </div>
+      <div class="col-md-4 mb-3">
+        <label class="form-label">Método de pago</label>
+        <select name="metodo_pago" id="metodoPagoSelect" class="form-select">
+          <option>Efectivo</option>
+          <option>Transferencia</option>
+          <option>Tarjeta</option>
+        </select>
+      </div>
+      <div class="col-md-3 mb-3">
+        <label class="form-label">Tipo de comprobante</label>
+        <select name="tipo_comprobante" id="tipoComprobanteSelect" class="form-select">
+          <option>Remito</option>
+          <option>Recibo</option>
+        </select>
+        <div id="facturaCHint" class="form-text text-warning d-none">
+          <i class="bi bi-receipt-cutoff"></i> Con este medio de pago se genera automáticamente una <strong>Factura C</strong> por ARCA.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="card p-4 mb-3">
+    <label class="form-label mb-1"><i class="bi bi-upc-scan"></i> Escanear producto</label>
+    <input type="text" id="scanInput" class="form-control form-control-lg" autocomplete="off" autofocus
+           placeholder="Apuntá la pistola lectora acá y escaneá el producto...">
+    <div class="form-text">También podés escribir el código y apretar Enter. Cada escaneo agrega el producto a la lista; si ya está, le suma una unidad.</div>
+    <div id="scanMsg" class="mt-2"></div>
+  </div>
+
+  <div class="card p-4 mb-3">
+    <div class="d-flex justify-content-between align-items-center mb-3">
+      <h6 class="mb-0">Productos</h6>
+      <button type="button" class="btn btn-sm btn-outline-primary" onclick="agregarFila()"><i class="bi bi-plus-lg"></i> Agregar producto</button>
+    </div>
+    <table class="table" id="itemsTable">
+      <thead><tr><th style="width:45%;">Producto</th><th style="width:120px;">Cantidad</th><th style="width:140px;">Precio unit.</th><th></th></tr></thead>
+      <tbody id="itemsBody"></tbody>
+    </table>
+  </div>
+
+  <button type="submit" class="btn btn-primary">Registrar venta</button>
+  <a href="{{ url_for('ventas_lista') }}" class="btn btn-link">Cancelar</a>
+</form>
+
+<template id="filaTemplate">
+  <tr>
+    <td>
+      <div class="position-relative">
+        <input type="text" class="form-control producto-buscar" autocomplete="off" required
+               placeholder="Buscar por nombre, código o marca...">
+        <input type="hidden" name="producto_id" class="producto-id">
+        <div class="list-group producto-resultados position-absolute w-100 shadow" style="z-index: 1050; max-height: 260px; overflow-y: auto; display: none;"></div>
+      </div>
+    </td>
+    <td><input type="number" name="cantidad" min="1" value="1" class="form-control" required></td>
+    <td><input type="text" name="precio_unitario_display" class="form-control" readonly></td>
+    <td><button type="button" class="btn btn-sm btn-outline-danger" onclick="this.closest('tr').remove()"><i class="bi bi-trash"></i></button></td>
+  </tr>
+</template>
+
+<div class="modal fade" id="modalNuevoCliente" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title"><i class="bi bi-person-plus"></i> Nuevo cliente</h5>
+        <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+      </div>
+      <div class="modal-body">
+        <div id="nuevoClienteError" class="alert alert-danger py-2 d-none"></div>
+        <div class="mb-3">
+          <label class="form-label">Nombre / Razón social *</label>
+          <input type="text" id="ncNombre" class="form-control" required>
+        </div>
+        <div class="row">
+          <div class="col-md-6 mb-3">
+            <label class="form-label">Teléfono</label>
+            <input type="text" id="ncTelefono" class="form-control">
+          </div>
+          <div class="col-md-6 mb-3">
+            <label class="form-label">Email</label>
+            <input type="email" id="ncEmail" class="form-control">
+          </div>
+        </div>
+        <div class="mb-3">
+          <label class="form-label">Dirección</label>
+          <input type="text" id="ncDireccion" class="form-control">
+        </div>
+        <div class="mb-3">
+          <label class="form-label">CUIT / DNI</label>
+          <input type="text" id="ncCuitDni" class="form-control">
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-link" data-bs-dismiss="modal">Cancelar</button>
+        <button type="button" class="btn btn-primary" id="btnGuardarCliente">Guardar y usar en esta venta</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+const PRODUCTOS = {{ productos_json|tojson }};
+
+// ---------------------------------------------------------------------------
+// Buscador de productos tipo autocompletar: no case-sensitive, filtra por
+// nombre, código o marca a medida que se escribe.
+// ---------------------------------------------------------------------------
+function inicializarBuscador(fila) {
+  const buscarInput = fila.querySelector('.producto-buscar');
+  const idInput = fila.querySelector('.producto-id');
+  const resultados = fila.querySelector('.producto-resultados');
+  const precioInput = fila.querySelector('input[name="precio_unitario_display"]');
+
+  function ocultar() { resultados.style.display = 'none'; resultados.innerHTML = ''; }
+
+  function mostrarResultados(lista) {
+    resultados.innerHTML = '';
+    if (lista.length === 0) {
+      const vacio = document.createElement('div');
+      vacio.className = 'list-group-item text-muted small';
+      vacio.textContent = 'No hay productos que coincidan.';
+      resultados.appendChild(vacio);
+      resultados.style.display = 'block';
+      return;
+    }
+    lista.slice(0, 8).forEach(function(p) {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'list-group-item list-group-item-action py-2';
+      const sinStock = p.stock_actual <= 0 ? ' <span class="text-danger">(sin stock)</span>' : '';
+      item.innerHTML = '<div class="d-flex justify-content-between align-items-center">' +
+        '<span>' + p.nombre + ' <span class="text-muted small">(' + (p.codigo || 's/código') + (p.marca ? ' · ' + p.marca : '') + ')</span></span>' +
+        '<span class="text-muted small">stock: ' + p.stock_actual + sinStock + '</span></div>';
+      // mousedown (no click) para que dispare antes de que el input pierda el foco
+      item.addEventListener('mousedown', function(e) {
+        e.preventDefault();
+        idInput.value = p.id;
+        buscarInput.value = p.nombre + ' (' + (p.codigo || 's/código') + ')';
+        precioInput.value = '$' + p.precio_venta;
+        ocultar();
+      });
+      resultados.appendChild(item);
+    });
+    resultados.style.display = 'block';
+  }
+
+  buscarInput.addEventListener('input', function() {
+    idInput.value = ''; // hasta que no elija de la lista, no hay producto válido
+    precioInput.value = '';
+    const q = buscarInput.value.trim().toLowerCase();
+    if (!q) { ocultar(); return; }
+    const filtrados = PRODUCTOS.filter(function(p) {
+      const texto = (p.nombre + ' ' + p.codigo + ' ' + p.marca).toLowerCase();
+      return texto.includes(q);
+    });
+    mostrarResultados(filtrados);
+  });
+
+  buscarInput.addEventListener('focus', function() {
+    if (buscarInput.value.trim() && !idInput.value) buscarInput.dispatchEvent(new Event('input'));
+  });
+
+  document.addEventListener('mousedown', function(e) {
+    if (!fila.contains(e.target)) ocultar();
+  });
+}
+
+function agregarFila() {
+  const tpl = document.getElementById('filaTemplate');
+  const clone = tpl.content.cloneNode(true);
+  document.getElementById('itemsBody').appendChild(clone);
+  const fila = document.getElementById('itemsBody').lastElementChild;
+  inicializarBuscador(fila);
+  return fila;
+}
+// arrancar con una fila
+agregarFila();
+
+// ---------------------------------------------------------------------------
+// Regla del negocio: efectivo -> remito/recibo interno (se elige acá);
+// tarjeta o transferencia -> Factura C automática por ARCA (no se elige).
+// ---------------------------------------------------------------------------
+const metodoPagoSelect = document.getElementById('metodoPagoSelect');
+const tipoComprobanteSelect = document.getElementById('tipoComprobanteSelect');
+const facturaCHint = document.getElementById('facturaCHint');
+
+function actualizarTipoComprobante() {
+  const esFacturaC = metodoPagoSelect.value === 'Tarjeta' || metodoPagoSelect.value === 'Transferencia';
+  tipoComprobanteSelect.disabled = esFacturaC;
+  facturaCHint.classList.toggle('d-none', !esFacturaC);
+}
+metodoPagoSelect.addEventListener('change', actualizarTipoComprobante);
+actualizarTipoComprobante();
+
+// ---------------------------------------------------------------------------
+// Alta rápida de cliente (modal), sin perder los productos ya cargados en
+// esta venta.
+// ---------------------------------------------------------------------------
+const modalNuevoCliente = new bootstrap.Modal(document.getElementById('modalNuevoCliente'));
+
+document.getElementById('btnGuardarCliente').addEventListener('click', function() {
+  const nombre = document.getElementById('ncNombre').value.trim();
+  const errorBox = document.getElementById('nuevoClienteError');
+  errorBox.classList.add('d-none');
+
+  if (!nombre) {
+    errorBox.textContent = 'El nombre es obligatorio.';
+    errorBox.classList.remove('d-none');
+    return;
+  }
+
+  const datos = new FormData();
+  datos.append('nombre', nombre);
+  datos.append('telefono', document.getElementById('ncTelefono').value.trim());
+  datos.append('email', document.getElementById('ncEmail').value.trim());
+  datos.append('direccion', document.getElementById('ncDireccion').value.trim());
+  datos.append('cuit_dni', document.getElementById('ncCuitDni').value.trim());
+
+  fetch('/api/clientes-nuevo', { method: 'POST', body: datos })
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (!data.ok) {
+        errorBox.textContent = data.error || 'No se pudo crear el cliente.';
+        errorBox.classList.remove('d-none');
+        return;
+      }
+      const select = document.getElementById('clienteSelect');
+      const opcion = document.createElement('option');
+      opcion.value = data.id;
+      opcion.textContent = data.nombre;
+      opcion.selected = true;
+      select.appendChild(opcion);
+
+      // limpiar el formulario del modal para la próxima vez
+      ['ncNombre', 'ncTelefono', 'ncEmail', 'ncDireccion', 'ncCuitDni'].forEach(function(id) {
+        document.getElementById(id).value = '';
+      });
+      modalNuevoCliente.hide();
+    })
+    .catch(function() {
+      errorBox.textContent = 'Hubo un problema de conexión. Intentá de nuevo.';
+      errorBox.classList.remove('d-none');
+    });
+});
+
+// Si escribieron un texto en el buscador pero no eligieron ningún producto
+// de la lista, el hidden queda vacío: avisamos en vez de mandar la venta mal.
+document.getElementById('ventaForm').addEventListener('submit', function(e) {
+  const filas = document.querySelectorAll('#itemsBody tr');
+  for (const fila of filas) {
+    const texto = fila.querySelector('.producto-buscar').value.trim();
+    const id = fila.querySelector('.producto-id').value;
+    if (texto && !id) {
+      e.preventDefault();
+      alert('Elegí el producto de la lista que aparece al escribir (no alcanza con tipear el nombre). Revisá la fila: "' + texto + '".');
+      return;
+    }
+  }
+});
+
+// ---------------------------------------------------------------------------
+// Escaneo con pistola lectora de código de barras.
+// La pistola se comporta como un teclado: "tipea" el código y manda Enter.
+// ---------------------------------------------------------------------------
+const scanInput = document.getElementById('scanInput');
+const scanMsg = document.getElementById('scanMsg');
+
+function mostrarMensaje(texto, tipo) {
+  scanMsg.innerHTML = '<div class="alert alert-' + tipo + ' py-2 mb-0">' + texto + '</div>';
+  setTimeout(function() { scanMsg.innerHTML = ''; }, 4000);
+}
+
+function sumarProducto(prod) {
+  // si el producto ya está en la lista, le sumamos una unidad
+  const filas = document.querySelectorAll('#itemsBody tr');
+  for (const fila of filas) {
+    const idInput = fila.querySelector('.producto-id');
+    if (idInput && idInput.value == prod.id) {
+      const cantidad = fila.querySelector('input[name="cantidad"]');
+      cantidad.value = parseInt(cantidad.value || '0') + 1;
+      mostrarMensaje('Sumada 1 unidad de <strong>' + prod.nombre + '</strong> (ahora ' + cantidad.value + ').', 'success');
+      return;
+    }
+  }
+  // si no está, buscamos una fila vacía o creamos una nueva
+  let filaObjetivo = null;
+  for (const fila of filas) {
+    const idInput = fila.querySelector('.producto-id');
+    if (idInput && !idInput.value) { filaObjetivo = fila; break; }
+  }
+  if (!filaObjetivo) filaObjetivo = agregarFila();
+
+  filaObjetivo.querySelector('.producto-id').value = prod.id;
+  filaObjetivo.querySelector('.producto-buscar').value = prod.nombre + ' (' + (prod.codigo || 's/código') + ')';
+  filaObjetivo.querySelector('input[name="precio_unitario_display"]').value = '$' + prod.precio_venta;
+  filaObjetivo.querySelector('input[name="cantidad"]').value = 1;
+  mostrarMensaje('Agregado <strong>' + prod.nombre + '</strong>.', 'success');
+}
+
+scanInput.addEventListener('keydown', function(e) {
+  if (e.key !== 'Enter') return;
+  e.preventDefault();
+  const codigo = scanInput.value.trim();
+  scanInput.value = '';
+  if (!codigo) return;
+
+  fetch('/api/producto-por-codigo?codigo=' + encodeURIComponent(codigo))
+    .then(function(r) { return r.json(); })
+    .then(function(data) {
+      if (!data.encontrado) {
+        mostrarMensaje('No encontré ningún producto con el código <strong>' + codigo + '</strong>. Revisá que esté cargado en el stock.', 'warning');
+        return;
+      }
+      if (data.stock_actual <= 0) {
+        mostrarMensaje('Ojo: <strong>' + data.nombre + '</strong> figura sin stock. Igual lo agrego.', 'warning');
+      }
+      sumarProducto(data);
+    })
+    .catch(function() {
+      mostrarMensaje('Hubo un problema al buscar el producto. Intentá de nuevo.', 'danger');
+    });
+});
+</script>
+{% endblock %}

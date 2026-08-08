@@ -1,0 +1,98 @@
+{% extends "base_publica.html" %}
+{% block title %}Catálogo | {{ negocio.nombre }}{% endblock %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-3">
+  <h4 class="mb-0"><i class="bi bi-grid"></i> Catálogo</h4>
+</div>
+
+<form method="get" class="card p-3 mb-3">
+  {% if categoria %}<input type="hidden" name="categoria" value="{{ categoria }}">{% endif %}
+  <div class="row g-2 align-items-end">
+    <div class="col-md-4">
+      <label class="form-label small text-muted mb-1">Buscar</label>
+      <input type="text" name="q" class="form-control" placeholder="Nombre, marca o modelo..." value="{{ q }}">
+    </div>
+    <div class="col-md-3">
+      <label class="form-label small text-muted mb-1">Marca</label>
+      <select name="marca" class="form-select">
+        <option value="">Todas</option>
+        {% for m in marcas_disponibles %}
+          <option value="{{ m }}" {{ 'selected' if marca == m else '' }}>{{ m }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-3">
+      <label class="form-label small text-muted mb-1">Auto compatible</label>
+      <select name="modelo" class="form-select">
+        <option value="">Todos</option>
+        {% for md in modelos_disponibles %}
+          <option value="{{ md }}" {{ 'selected' if modelo == md else '' }}>{{ md }}</option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md-2 d-flex gap-1">
+      <div>
+        <label class="form-label small text-muted mb-1">Precio min.</label>
+        <input type="number" name="precio_min" class="form-control" value="{{ precio_min }}" min="0">
+      </div>
+      <div>
+        <label class="form-label small text-muted mb-1">Precio máx.</label>
+        <input type="number" name="precio_max" class="form-control" value="{{ precio_max }}" min="0">
+      </div>
+    </div>
+  </div>
+  <div class="mt-2 d-flex gap-2">
+    <button type="submit" class="btn btn-primary btn-sm"><i class="bi bi-funnel"></i> Filtrar</button>
+    {% if q or marca or modelo or precio_min or precio_max %}
+      <a href="{{ url_for('tienda_catalogo', categoria=categoria) }}" class="btn btn-outline-secondary btn-sm">Limpiar filtros</a>
+    {% endif %}
+  </div>
+</form>
+
+<div class="d-flex flex-wrap gap-2 mb-4">
+  <a href="{{ url_for('tienda_catalogo', q=q, marca=marca, modelo=modelo, precio_min=precio_min, precio_max=precio_max) }}" class="btn btn-sm {{ 'btn-primary' if not categoria else 'btn-outline-primary' }}">Todas</a>
+  {% for cat in categorias %}
+    <a href="{{ url_for('tienda_catalogo', categoria=cat, q=q, marca=marca, modelo=modelo, precio_min=precio_min, precio_max=precio_max) }}" class="btn btn-sm {{ 'btn-primary' if categoria == cat else 'btn-outline-primary' }}">
+      {{ cat }}{% if conteo_categorias.get(cat) %} <span class="badge {{ 'bg-light text-dark' if categoria == cat else 'bg-secondary' }}">{{ conteo_categorias[cat] }}</span>{% endif %}
+    </a>
+  {% endfor %}
+</div>
+
+{% if not productos %}
+  <div class="alert alert-info">
+    No encontramos productos con esos filtros.
+  </div>
+{% endif %}
+
+<div class="row g-3">
+  {% for p in productos %}
+  <div class="col-sm-6 col-lg-4">
+    <div class="card h-100 p-3">
+      {% if p.imagen %}
+        <img src="{{ url_for('static', filename='img/productos/' + p.imagen) }}" alt="{{ p.nombre }}" class="mb-2" style="width:100%;height:160px;object-fit:cover;border-radius:8px;">
+      {% else %}
+        <div class="d-flex align-items-center justify-content-center mb-2 bg-light" style="width:100%;height:160px;border-radius:8px;">
+          <i class="bi bi-image text-muted" style="font-size:2.5rem;"></i>
+        </div>
+      {% endif %}
+      <a href="{{ url_for('tienda_catalogo', categoria=p.categoria) }}" class="badge bg-secondary align-self-start mb-2 text-decoration-none">{{ p.categoria }}</a>
+      <h6 class="mb-1">{{ p.nombre }}</h6>
+      <div class="text-muted small mb-2">
+        {% if p.marca %}{{ p.marca }}{% endif %}{% if p.modelo_compatible %} · {{ p.modelo_compatible }}{% endif %}
+      </div>
+      <div class="mt-auto">
+        <div class="fs-5 fw-bold mb-2">{{ p.precio_venta|money }}</div>
+        <form method="post" action="{{ url_for('tienda_carrito_agregar') }}" class="d-flex gap-2">
+          <input type="hidden" name="producto_id" value="{{ p.id }}">
+          <input type="number" name="cantidad" value="1" min="1" max="{{ p.stock_actual }}" class="form-control" style="width: 80px;">
+          <button type="submit" class="btn btn-primary flex-grow-1"><i class="bi bi-cart-plus"></i> Agregar</button>
+        </form>
+        <div class="small text-muted mt-1">Stock disponible: {{ p.stock_actual }}</div>
+      </div>
+    </div>
+  </div>
+  {% endfor %}
+</div>
+
+{% endblock %}

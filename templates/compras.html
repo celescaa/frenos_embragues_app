@@ -1,0 +1,28 @@
+{% extends "base.html" %}
+{% block title %}Compras | Frenos & Embragues{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mb-0"><i class="bi bi-bag-plus"></i> Compras a proveedores</h4>
+  <div>
+    <a href="{{ url_for('compras_importar_factura') }}" class="btn btn-outline-primary"><i class="bi bi-file-earmark-arrow-up"></i> Importar factura</a>
+    <a href="{{ url_for('compras_nueva') }}" class="btn btn-primary"><i class="bi bi-plus-lg"></i> Nueva compra</a>
+  </div>
+</div>
+<div class="card p-3">
+  <table class="table table-hover align-middle mb-0">
+    <thead><tr><th>Fecha</th><th>Proveedor</th><th>N° factura proveedor</th><th class="text-end">Total</th></tr></thead>
+    <tbody>
+    {% for c in compras %}
+      <tr>
+        <td>{{ c.fecha }}</td>
+        <td>{{ c.proveedor_nombre or '—' }}</td>
+        <td>{{ c.numero_factura_proveedor }}</td>
+        <td class="text-end">{{ c.total|money }}</td>
+      </tr>
+    {% else %}
+      <tr><td colspan="4" class="text-center text-muted py-4">Todavía no hay compras registradas.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% block title %}Categorías | Frenos & Embragues{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mb-0"><i class="bi bi-tags"></i> Categorías de producto</h4>
+</div>
+
+<div class="card p-3 mb-3">
+  <form method="post" action="{{ url_for('categorias_nueva') }}" class="row g-2 align-items-end">
+    <div class="col-auto flex-grow-1">
+      <label class="form-label mb-1">Nueva categoría</label>
+      <input type="text" name="nombre" class="form-control" placeholder="Ej: Rótulas" required>
+    </div>
+    <div class="col-auto">
+      <button type="submit" class="btn btn-primary"><i class="bi bi-plus-lg"></i> Agregar</button>
+    </div>
+  </form>
+  <div class="form-text mt-2">
+    Se usan para agrupar productos en el listado de Stock y en los filtros de la tienda online.
+    Cada categoría puede tener subcategorías propias (por ejemplo "Suspensión y Dirección" →
+    "Amortiguadores", "Bujes", etc.) para clasificar mejor sin que la lista de categorías se haga
+    interminable. Si vendés algo que no entra en ninguna, agregala acá — no hace falta tocar código.
+  </div>
+</div>
+
+<div class="mb-3">
+  {% if mostrar_todas %}
+    <a href="{{ url_for('categorias_lista') }}" class="btn btn-sm btn-outline-secondary">Ver solo activas</a>
+  {% else %}
+    <a href="{{ url_for('categorias_lista', todas=1) }}" class="btn btn-sm btn-outline-secondary">Ver también las desactivadas</a>
+  {% endif %}
+</div>
+
+{% for c in categorias %}
+  <div class="card p-3 mb-3">
+    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+      <div class="d-flex align-items-center gap-2">
+        <h6 class="mb-0 {{ 'text-muted' if not c.activo else '' }}">{{ c.nombre }}</h6>
+        {% if c.activo %}
+          <span class="badge bg-success">Activa</span>
+        {% else %}
+          <span class="badge bg-secondary">Desactivada</span>
+        {% endif %}
+        <span class="text-muted small">{{ conteo.get(c.nombre, 0) }} producto(s) en esta categoría</span>
+      </div>
+      <div>
+        {% if c.activo %}
+          <form method="post" action="{{ url_for('categorias_desactivar', categoria_id=c.id, todas=1 if mostrar_todas else None) }}" class="d-inline">
+            <button class="btn btn-sm btn-outline-warning" title="Desactivar (no se va a poder elegir en productos nuevos, pero no borra lo ya cargado)"><i class="bi bi-slash-circle"></i></button>
+          </form>
+        {% else %}
+          <form method="post" action="{{ url_for('categorias_activar', categoria_id=c.id, todas=1 if mostrar_todas else None) }}" class="d-inline">
+            <button class="btn btn-sm btn-outline-success" title="Activar"><i class="bi bi-check-circle"></i></button>
+          </form>
+        {% endif %}
+        <form method="post" action="{{ url_for('categorias_eliminar', categoria_id=c.id) }}" class="d-inline" onsubmit="return confirm('¿Eliminar esta categoría? Si tiene productos cargados no se va a poder — mejor desactivala.');">
+          <button class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>
+        </form>
+      </div>
+    </div>
+
+    {% set subs = subcategorias_por_categoria.get(c.id, []) %}
+    {% if subs %}
+      <table class="table table-sm align-middle mt-3 mb-2">
+        <thead><tr><th>Subcategoría</th><th class="text-end">Productos</th><th>Estado</th><th></th></tr></thead>
+        <tbody>
+        {% for s in subs %}
+          <tr class="{{ 'text-muted' if not s.activo else '' }}">
+            <td>{{ s.nombre }}</td>
+            <td class="text-end">{{ conteo_subcategoria.get(s.nombre, 0) }}</td>
+            <td>
+              {% if s.activo %}
+                <span class="badge bg-success">Activa</span>
+              {% else %}
+                <span class="badge bg-secondary">Desactivada</span>
+              {% endif %}
+            </td>
+            <td class="text-end">
+              {% if s.activo %}
+                <form method="post" action="{{ url_for('subcategorias_desactivar', subcategoria_id=s.id, todas=1 if mostrar_todas else None) }}" class="d-inline">
+                  <button class="btn btn-sm btn-outline-warning" title="Desactivar"><i class="bi bi-slash-circle"></i></button>
+                </form>
+              {% else %}
+                <form method="post" action="{{ url_for('subcategorias_activar', subcategoria_id=s.id, todas=1 if mostrar_todas else None) }}" class="d-inline">
+                  <button class="btn btn-sm btn-outline-success" title="Activar"><i class="bi bi-check-circle"></i></button>
+                </form>
+              {% endif %}
+              <form method="post" action="{{ url_for('subcategorias_eliminar', subcategoria_id=s.id) }}" class="d-inline" onsubmit="return confirm('¿Eliminar esta subcategoría? Si tiene productos cargados no se va a poder.');">
+                <button class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>
+              </form>
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    {% endif %}
+
+    <form method="post" action="{{ url_for('subcategorias_nueva', categoria_id=c.id) }}" class="row g-2 align-items-end mt-1">
+      <div class="col-auto flex-grow-1">
+        <input type="text" name="nombre" class="form-control form-control-sm" placeholder="Nueva subcategoría para {{ c.nombre }}" required>
+      </div>
+      <div class="col-auto">
+        <button type="submit" class="btn btn-sm btn-outline-primary"><i class="bi bi-plus-lg"></i> Agregar subcategoría</button>
+      </div>
+    </form>
+  </div>
+{% else %}
+  <div class="card p-5 text-center text-muted">No hay categorías cargadas todavía.</div>
+{% endfor %}
+{% endblock %}

@@ -1,0 +1,33 @@
+# Datos y secretos locales — no se suben al repositorio
+data.db
+data.db-journal
+.secret_key
+credenciales_iniciales.txt
+.env
+
+# Carpeta de datos persistentes cuando se corre con docker-compose (ver
+# docker-compose.yml) — mismo contenido que las líneas de arriba, pero
+# agrupado en una carpeta para poder montarla como volumen.
+/data/
+
+# Fotos de productos subidas desde la ficha (datos del negocio, no código)
+static/img/productos/*
+!static/img/productos/.gitkeep
+
+# Listas de precios de proveedores (datos del negocio, pueden ser pesadas)
+listas_proveedores/
+
+# Planilla de carga de stock real por proveedor (una vez completada tiene
+# costos y cantidades reales del negocio)
+plantillas/Planilla_Stock_Por_Proveedor.xlsx
+
+# Planilla de carga de datos: se completa a mano con clientes/productos/
+# proveedores/ventas reales del negocio, no es solo una plantilla en blanco.
+plantillas/Plantilla_Carga_Datos.xlsx
+
+# Entorno virtual
+.venv/
+
+# Python
+__pycache__/
+*.pyc

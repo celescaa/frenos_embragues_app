@@ -1,0 +1,20 @@
+# Uso local: docker compose up --build
+# (Para desplegar en Render/Railway/Fly.io/un VPS, cada uno tiene su propia
+# forma de construir la imagen del Dockerfile y de declarar volúmenes
+# persistentes — este archivo es sobre todo para probar todo el paquete
+# igual que va a correr en cualquier lado, antes de subirlo a un hosting.)
+services:
+  app:
+    build: .
+    ports:
+      - "5050:5050"
+    volumes:
+      # Base de datos, .secret_key y credenciales_iniciales.txt: si esto no
+      # se monta como volumen, se pierde todo cada vez que se recrea el
+      # contenedor (por ejemplo, al hacer un nuevo `docker compose up --build`).
+      - ./data:/app/data
+      # Fotos de producto subidas desde la ficha.
+      - ./static/img/productos:/app/static/img/productos
+    env_file:
+      - .env
+    restart: unless-stopped

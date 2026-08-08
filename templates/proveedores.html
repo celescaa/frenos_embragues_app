@@ -1,0 +1,57 @@
+{% extends "base.html" %}
+{% block title %}Proveedores | Frenos & Embragues{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mb-0"><i class="bi bi-truck"></i> Proveedores</h4>
+  <a href="{{ url_for('proveedores_nuevo') }}" class="btn btn-primary"><i class="bi bi-plus-lg"></i> Nuevo proveedor</a>
+</div>
+
+<div class="mb-3">
+  {% if mostrar_todos %}
+    <a href="{{ url_for('proveedores_lista') }}" class="btn btn-sm btn-outline-secondary">Ver solo activos</a>
+  {% else %}
+    <a href="{{ url_for('proveedores_lista', todos=1) }}" class="btn btn-sm btn-outline-secondary">Ver también los desactivados</a>
+  {% endif %}
+</div>
+
+<div class="card p-3">
+  <table class="table table-hover align-middle mb-0">
+    <thead><tr><th>Nombre</th><th>Teléfono</th><th>Email</th><th>Dirección</th><th>CUIT</th><th>Estado</th><th></th></tr></thead>
+    <tbody>
+    {% for p in proveedores %}
+      <tr class="{{ 'text-muted' if not p.activo else '' }}">
+        <td>{{ p.nombre }}</td>
+        <td>{{ p.telefono }}</td>
+        <td>{{ p.email }}</td>
+        <td>{{ p.direccion }}</td>
+        <td>{{ p.cuit }}</td>
+        <td>
+          {% if p.activo %}
+            <span class="badge bg-success">Activo</span>
+          {% else %}
+            <span class="badge bg-secondary">Desactivado</span>
+          {% endif %}
+        </td>
+        <td class="text-end">
+          <a href="{{ url_for('proveedores_editar', proveedor_id=p.id) }}" class="btn btn-sm btn-outline-secondary"><i class="bi bi-pencil"></i></a>
+          {% if p.activo %}
+            <form method="post" action="{{ url_for('proveedores_desactivar', proveedor_id=p.id, todos=1 if mostrar_todos else None) }}" class="d-inline">
+              <button class="btn btn-sm btn-outline-warning" title="Desactivar (no se puede elegir para nada nuevo, pero no borra lo ya cargado)"><i class="bi bi-slash-circle"></i></button>
+            </form>
+          {% else %}
+            <form method="post" action="{{ url_for('proveedores_activar', proveedor_id=p.id, todos=1 if mostrar_todos else None) }}" class="d-inline">
+              <button class="btn btn-sm btn-outline-success" title="Activar"><i class="bi bi-check-circle"></i></button>
+            </form>
+          {% endif %}
+          <form method="post" action="{{ url_for('proveedores_eliminar', proveedor_id=p.id) }}" class="d-inline" onsubmit="return confirm('¿Eliminar este proveedor? Si tiene productos, compras o cotizaciones cargadas no se va a poder — mejor desactivalo.');">
+            <button class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>
+          </form>
+        </td>
+      </tr>
+    {% else %}
+      <tr><td colspan="7" class="text-center text-muted py-4">No hay proveedores cargados todavía.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}

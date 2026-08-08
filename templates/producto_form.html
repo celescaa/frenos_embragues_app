@@ -1,0 +1,185 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Editar producto' if producto else 'Nuevo producto' }}{% endblock %}
+{% block content %}
+<h4 class="mb-3">{{ 'Editar producto' if producto else 'Nuevo producto' }}</h4>
+<div class="card p-4 mb-3" style="max-width: 860px;">
+  <form method="post" id="productoForm" enctype="multipart/form-data">
+    <div class="row">
+      <div class="col-md-4 mb-3">
+        <label class="form-label">Código</label>
+        <input type="text" name="codigo" class="form-control" value="{{ producto.codigo if producto else '' }}">
+      </div>
+      <div class="col-md-8 mb-3">
+        <label class="form-label">Nombre *</label>
+        <input type="text" name="nombre" class="form-control" required value="{{ producto.nombre if producto else '' }}">
+      </div>
+    </div>
+    <div class="row">
+      <div class="col-md-12 mb-3">
+        <label class="form-label">Foto del producto</label>
+        {% if producto and producto.imagen %}
+          <div class="d-flex align-items-center gap-3 mb-2">
+            <img src="{{ url_for('static', filename='img/productos/' + producto.imagen) }}" alt="{{ producto.nombre }}" style="width:90px;height:90px;object-fit:cover;border-radius:8px;">
+            <div class="form-check">
+              <input class="form-check-input" type="checkbox" name="eliminar_imagen" value="1" id="eliminarImagen">
+              <label class="form-check-label" for="eliminarImagen">Quitar esta foto</label>
+            </div>
+          </div>
+        {% endif %}
+        <input type="file" name="imagen" class="form-control" accept=".jpg,.jpeg,.png,.webp">
+        <div class="form-text">Opcional. Se muestra en el catálogo de la tienda online y en el listado de stock. Formatos: JPG, PNG o WEBP.</div>
+      </div>
+    </div>
+    <div class="row">
+      <div class="col-md-4 mb-3">
+        <label class="form-label">Categoría</label>
+        <select name="categoria" id="categoriaSelect" class="form-select">
+          {% for cat in categorias %}
+            <option value="{{ cat }}" {{ 'selected' if producto and producto.categoria == cat else '' }}>{{ cat }}</option>
+          {% endfor %}
+        </select>
+      </div>
+      <div class="col-md-4 mb-3">
+        <label class="form-label">Subcategoría</label>
+        <select name="subcategoria" id="subcategoriaSelect" class="form-select">
+          <option value="">-- Sin especificar --</option>
+        </select>
+      </div>
+    </div>
+    <div class="row">
+      <div class="col-md-6 mb-3">
+        <label class="form-label">Marca</label>
+        <input type="text" name="marca" class="form-control" value="{{ producto.marca if producto else '' }}">
+      </div>
+      <div class="col-md-6 mb-3">
+        <label class="form-label">Modelo compatible</label>
+        <input type="text" name="modelo_compatible" class="form-control" value="{{ producto.modelo_compatible if producto else '' }}">
+      </div>
+    </div>
+    <div class="row">
+      <div class="col-md-3 mb-3">
+        <label class="form-label">Precio de costo</label>
+        <input type="number" step="0.01" name="precio_costo" class="form-control" value="{{ producto.precio_costo if producto else 0 }}">
+        <div class="form-text">Último costo de compra. Si cargás varios proveedores abajo, no hace falta tocar este a mano.</div>
+      </div>
+      <div class="col-md-3 mb-3">
+        <label class="form-label">Precio de venta</label>
+        <input type="number" step="0.01" name="precio_venta" class="form-control" value="{{ producto.precio_venta if producto else 0 }}">
+      </div>
+      <div class="col-md-3 mb-3">
+        <label class="form-label">Stock actual</label>
+        <input type="number" name="stock_actual" class="form-control" value="{{ producto.stock_actual if producto else 0 }}">
+      </div>
+      <div class="col-md-3 mb-3">
+        <label class="form-label">Stock mínimo</label>
+        <input type="number" name="stock_minimo" class="form-control" value="{{ producto.stock_minimo if producto else 2 }}">
+      </div>
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Código de barras</label>
+      <input type="text" name="codigo_barras" class="form-control" autocomplete="off"
+             placeholder="Escaneá el producto con la pistola o escribí el número"
+             value="{{ producto.codigo_barras or '' if producto else '' }}">
+      <div class="form-text">Opcional. Si lo cargás, después podés vender escaneando el producto.</div>
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Proveedor preferido</label>
+      <select name="proveedor_id" class="form-select">
+        <option value="">-- Sin especificar --</option>
+        {% for prov in proveedores %}
+          <option value="{{ prov.id }}" {{ 'selected' if producto and producto.proveedor_id == prov.id else '' }}>{{ prov.nombre }}</option>
+        {% endfor %}
+      </select>
+      <div class="form-text">Se usa como referencia si no cargás varios proveedores abajo.</div>
+    </div>
+
+    <hr class="my-4">
+
+    <div class="d-flex justify-content-between align-items-center mb-2">
+      <div>
+        <h6 class="mb-0">Precios por proveedor</h6>
+        <div class="form-text mb-0">Cargá acá a qué precio te vende este producto cada proveedor. La lista de pedidos va a sugerir automáticamente el más barato.</div>
+      </div>
+      <button type="button" class="btn btn-sm btn-outline-primary" onclick="agregarCotizacion()"><i class="bi bi-plus-lg"></i> Agregar proveedor</button>
+    </div>
+    <table class="table table-sm" id="cotizacionesTable">
+      <thead><tr><th>Proveedor</th><th style="width:160px;">Precio de costo</th><th style="width:160px;">Código del proveedor</th><th></th></tr></thead>
+      <tbody id="cotizacionesBody"></tbody>
+    </table>
+
+    <button type="submit" class="btn btn-primary">Guardar</button>
+    <a href="{{ url_for('productos_lista') }}" class="btn btn-link">Cancelar</a>
+  </form>
+</div>
+
+<template id="cotizacionTemplate">
+  <tr>
+    <td>
+      <select name="cotiz_proveedor_id" class="form-select form-select-sm" required>
+        <option value="">-- Elegir proveedor --</option>
+        {% for prov in proveedores %}
+          <option value="{{ prov.id }}">{{ prov.nombre }}</option>
+        {% endfor %}
+      </select>
+    </td>
+    <td><input type="number" step="0.01" name="cotiz_precio_costo" class="form-control form-control-sm" required></td>
+    <td><input type="text" name="cotiz_codigo_proveedor" class="form-control form-control-sm" placeholder="opcional"></td>
+    <td><button type="button" class="btn btn-sm btn-outline-danger" onclick="this.closest('tr').remove()"><i class="bi bi-trash"></i></button></td>
+  </tr>
+</template>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+function agregarCotizacion(proveedorId, precio, codigoProveedor) {
+  const tpl = document.getElementById('cotizacionTemplate');
+  const clone = tpl.content.cloneNode(true);
+  if (proveedorId) clone.querySelector('select[name="cotiz_proveedor_id"]').value = proveedorId;
+  if (precio) clone.querySelector('input[name="cotiz_precio_costo"]').value = precio;
+  if (codigoProveedor) clone.querySelector('input[name="cotiz_codigo_proveedor"]').value = codigoProveedor;
+  document.getElementById('cotizacionesBody').appendChild(clone);
+}
+
+const subcategoriasPorCategoria = {{ subcategorias_json|tojson }};
+const subcategoriaActual = {{ (producto.subcategoria if producto and producto.subcategoria else '')|tojson }};
+
+function actualizarSubcategorias(preseleccionar) {
+  const categoria = document.getElementById('categoriaSelect').value;
+  const select = document.getElementById('subcategoriaSelect');
+  const opciones = subcategoriasPorCategoria[categoria] || [];
+  select.innerHTML = '<option value="">-- Sin especificar --</option>';
+  opciones.forEach(function(nombre) {
+    const opt = document.createElement('option');
+    opt.value = nombre;
+    opt.textContent = nombre;
+    if (preseleccionar && nombre === subcategoriaActual) opt.selected = true;
+    select.appendChild(opt);
+  });
+}
+
+document.getElementById('categoriaSelect').addEventListener('change', function() {
+  actualizarSubcategorias(false);
+});
+actualizarSubcategorias(true);
+
+const cotizacionesExistentes = {{ cotizaciones|tojson }};
+if (cotizacionesExistentes.length > 0) {
+  cotizacionesExistentes.forEach(function(c) {
+    agregarCotizacion(c.proveedor_id, c.precio_costo, c.codigo_proveedor);
+  });
+} else {
+  agregarCotizacion();
+}
+
+// Antes de mandar el formulario, sacamos las filas que quedaron sin proveedor
+// elegido (por ejemplo la fila vacía inicial si no se completó).
+document.getElementById('productoForm').addEventListener('submit', function() {
+  document.querySelectorAll('#cotizacionesBody tr').forEach(function(fila) {
+    const proveedor = fila.querySelector('select[name="cotiz_proveedor_id"]').value;
+    const precio = fila.querySelector('input[name="cotiz_precio_costo"]').value;
+    if (!proveedor || !precio) fila.remove();
+  });
+});
+</script>
+{% endblock %}

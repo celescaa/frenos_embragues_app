@@ -1,0 +1,115 @@
+{% extends "base.html" %}
+{% block title %}Comprobante {{ venta.numero_comprobante }}{% endblock %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-3 no-print">
+  <h4 class="mb-0"><i class="bi bi-receipt"></i> Comprobante de venta</h4>
+  <div>
+    <button class="btn btn-outline-secondary" onclick="window.print()"><i class="bi bi-printer"></i> Imprimir / Guardar PDF</button>
+    {% if venta.cliente_email %}
+      <form method="post" action="{{ url_for('ventas_enviar_mail', venta_id=venta.id) }}" class="d-inline">
+        <button type="submit" class="btn btn-outline-secondary"><i class="bi bi-envelope"></i> Enviar por mail</button>
+      </form>
+    {% else %}
+      <button class="btn btn-outline-secondary" disabled title="El cliente no tiene un email cargado">
+        <i class="bi bi-envelope"></i> Enviar por mail
+      </button>
+    {% endif %}
+    <a href="{{ url_for('ventas_lista') }}" class="btn btn-link">Volver a ventas</a>
+  </div>
+</div>
+
+{% if venta.tipo_comprobante == "Factura C" and venta.cae %}
+  <div class="alert alert-success no-print">
+    <i class="bi bi-patch-check"></i> <strong>Factura C electrónica autorizada por ARCA.</strong>
+    CAE {{ venta.cae }} · vence {{ venta.cae_vencimiento }}.
+  </div>
+{% elif venta.tipo_comprobante == "Factura C" %}
+  <div class="alert alert-warning no-print d-flex justify-content-between align-items-center flex-wrap gap-2">
+    <div>
+      <i class="bi bi-exclamation-triangle"></i>
+      {% if venta.facturacion_estado == "sin_configurar" %}
+        Esta venta debería generar una <strong>Factura C</strong> por ARCA, pero todavía no está configurado el acceso a Afip SDK.
+      {% else %}
+        Esta venta debería generar una <strong>Factura C</strong> por ARCA, pero no se pudo emitir todavía{% if venta.facturacion_error %}: <span class="text-muted">{{ venta.facturacion_error }}</span>{% endif %}.
+      {% endif %}
+    </div>
+    <form method="post" action="{{ url_for('ventas_facturar', venta_id=venta.id) }}" class="m-0">
+      <button type="submit" class="btn btn-sm btn-outline-dark"><i class="bi bi-arrow-clockwise"></i> Reintentar facturación</button>
+    </form>
+  </div>
+{% else %}
+  <div class="alert alert-warning no-print">
+    <i class="bi bi-info-circle"></i> Este es un <strong>{{ venta.tipo_comprobante }} interno</strong> del negocio, no reemplaza una factura fiscal de AFIP.
+  </div>
+{% endif %}
+
+<div class="card p-4" style="border-top: 4px solid var(--si-gold);">
+  <div class="d-flex justify-content-between mb-4">
+    <div class="d-flex align-items-center gap-3">
+      <img src="{{ url_for('static', filename='img/logo_icon_soft.png') }}" alt="{{ negocio.nombre }}" height="80">
+      <div>
+        <h5 class="mb-0">{{ negocio.nombre }}</h5>
+        <div class="text-muted">{{ negocio.subtitulo }}</div>
+        <div class="text-muted small">{{ negocio.direccion }}</div>
+        <div class="text-muted small">WhatsApp: {{ negocio.telefono }} &nbsp;·&nbsp; CUIT: {{ negocio.cuit }}</div>
+      </div>
+    </div>
+    <div class="text-end">
+      <div><strong>{{ venta.tipo_comprobante }} N° {{ venta.numero_comprobante }}</strong></div>
+      <div class="text-muted">Fecha: {{ venta.fecha }}</div>
+    </div>
+  </div>
+
+  <div class="row mb-4">
+    <div class="col-md-6">
+      <h6>Cliente</h6>
+      <div>{{ venta.cliente_nombre or 'Consumidor final' }}</div>
+      {% if venta.cliente_telefono %}<div class="text-muted">Tel: {{ venta.cliente_telefono }}</div>{% endif %}
+      {% if venta.cliente_direccion %}<div class="text-muted">{{ venta.cliente_direccion }}</div>{% endif %}
+      {% if venta.cliente_cuit %}<div class="text-muted">CUIT/DNI: {{ venta.cliente_cuit }}</div>{% endif %}
+    </div>
+    <div class="col-md-6 text-md-end">
+      <h6>Método de pago</h6>
+      <div>{{ venta.metodo_pago }}</div>
+    </div>
+  </div>
+
+  <table class="table">
+    <thead><tr><th>Código</th><th>Producto</th><th class="text-end">Cantidad</th><th class="text-end">Precio unit.</th><th class="text-end">Subtotal</th></tr></thead>
+    <tbody>
+    {% for it in items %}
+      <tr>
+        <td>{{ it.producto_codigo }}</td>
+        <td>{{ it.producto_nombre }}</td>
+        <td class="text-end">{{ it.cantidad }}</td>
+        <td class="text-end">{{ it.precio_unitario|money }}</td>
+        <td class="text-end">{{ it.subtotal|money }}</td>
+      </tr>
+    {% endfor %}
+    </tbody>
+    <tfoot>
+      <tr><th colspan="4" class="text-end">Total</th><th class="text-end">{{ venta.total|money }}</th></tr>
+    </tfoot>
+  </table>
+
+  {% if venta.tipo_comprobante == "Factura C" and venta.cae %}
+  <div class="row mt-3 align-items-center">
+    <div class="col-md-8">
+      <div class="small text-muted">CAE</div>
+      <div>{{ venta.cae }}</div>
+      <div class="small text-muted mt-2">Vencimiento CAE</div>
+      <div>{{ venta.cae_vencimiento }}</div>
+      <div class="small text-muted mt-2">Punto de venta / N° de comprobante</div>
+      <div>{{ "%04d"|format(venta.punto_venta_arca) }}-{{ "%08d"|format(venta.numero_factura_arca) }}</div>
+    </div>
+    {% if qr_url %}
+    <div class="col-md-4 text-center">
+      <img src="https://api.qrserver.com/v1/create-qr-code/?size=160x160&data={{ qr_url|urlencode }}" alt="QR AFIP" width="160" height="160">
+      <div class="small text-muted mt-1">Comprobante autorizado por ARCA</div>
+    </div>
+    {% endif %}
+  </div>
+  {% endif %}
+</div>
+{% endblock %}

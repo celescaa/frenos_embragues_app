@@ -1,0 +1,32 @@
+{% extends "base.html" %}
+{% block title %}Importar factura | Frenos & Embragues{% endblock %}
+{% block content %}
+<h4 class="mb-3"><i class="bi bi-file-earmark-arrow-up"></i> Importar factura de compra</h4>
+
+<div class="card p-4" style="max-width: 640px;">
+  <p class="text-muted">
+    Subí la factura del proveedor (PDF, Excel o CSV) y el sistema va a tratar de reconocer los
+    productos, cantidades y precios. En la pantalla siguiente vas a poder revisar y corregir cada
+    línea antes de confirmar — nada se carga al stock hasta que apretás "Registrar compra".
+  </p>
+  <form method="post" enctype="multipart/form-data">
+    <div class="mb-3">
+      <label class="form-label">Archivo de la factura</label>
+      <input type="file" name="factura" class="form-control" accept=".pdf,.xlsx,.xls,.csv" required>
+      <div class="form-text">Formatos soportados: PDF, .xlsx, .xls, .csv.</div>
+    </div>
+    <button type="submit" class="btn btn-primary"><i class="bi bi-upload"></i> Leer factura</button>
+    <a href="{{ url_for('compras_nueva') }}" class="btn btn-link">Prefiero cargarla a mano</a>
+  </form>
+</div>
+
+<div class="card p-4 mt-3" style="max-width: 640px;">
+  <h6><i class="bi bi-info-circle"></i> Cómo funciona</h6>
+  <ul class="text-muted mb-0 small">
+    <li>Si el PDF tiene una tabla de productos con texto seleccionable (no una foto escaneada), lo lee directo.</li>
+    <li>Si no encuentra una tabla, prueba leer línea por línea — menos confiable, conviene revisar bien.</li>
+    <li>Cada línea se compara contra tu catálogo por código o por descripción. Si no está seguro, te lo marca para que confirmes vos.</li>
+    <li>Nunca actualiza el stock solo: siempre pasás por la pantalla de revisión antes.</li>
+  </ul>
+</div>
+{% endblock %}

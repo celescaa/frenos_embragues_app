@@ -1,0 +1,118 @@
+{% extends "base.html" %}
+{% block title %}Lista de pedidos | Frenos & Embragues{% endblock %}
+{% block content %}
+
+<div class="d-flex justify-content-between align-items-center mb-3 no-print">
+  <h4 class="mb-0"><i class="bi bi-clipboard-check"></i> Lista de pedidos a proveedores</h4>
+  <button class="btn btn-outline-secondary" onclick="window.print()"><i class="bi bi-printer"></i> Imprimir / Guardar PDF</button>
+</div>
+
+{% if grupos %}
+  <p class="text-muted no-print">
+    Estos son los productos que están en o por debajo del stock mínimo, agrupados por el proveedor
+    más conveniente para cada uno (cuando hay varios proveedores cargados, elige el de menor precio).
+    La cantidad sugerida repone hasta el doble del mínimo — podés ajustarla antes de pedir.
+  </p>
+
+  {% if ahorro_total > 0 %}
+    <div class="alert alert-success no-print">
+      <i class="bi bi-piggy-bank"></i> Comprando siempre al proveedor más barato de cada producto,
+      te ahorrás aproximadamente <strong>{{ ahorro_total|money }}</strong> en este pedido.
+    </div>
+  {% endif %}
+
+  {% for proveedor, datos in grupos.items() %}
+    <div class="card p-4 mb-3">
+      <div class="d-flex justify-content-between align-items-start mb-3">
+        <div>
+          <h5 class="mb-1">{{ proveedor }}</h5>
+          <div class="text-muted small">
+            {% if datos.email %}<i class="bi bi-envelope"></i> {{ datos.email }}{% endif %}
+            {% if datos.telefono %}&nbsp;&nbsp;<i class="bi bi-telephone"></i> {{ datos.telefono }}{% endif %}
+          </div>
+        </div>
+        <div class="text-end">
+          <div class="text-muted small">Costo estimado</div>
+          <h5 class="mb-0">{{ datos.total_estimado|money }}</h5>
+        </div>
+      </div>
+
+      <form method="post" action="{{ url_for('pedidos_marcar') }}">
+        <table class="table table-sm align-middle mb-2">
+          <thead>
+            <tr>
+              <th>Código</th><th>Producto</th>
+              <th class="text-end">Stock</th><th class="text-end">Mínimo</th>
+              <th class="text-end">A pedir</th><th class="text-end">Costo unit.</th><th class="text-end">Subtotal</th>
+            </tr>
+          </thead>
+          <tbody>
+          {% for it in datos['items'] %}
+            <tr>
+              <td>
+                <input type="hidden" name="producto_id" value="{{ it.producto_id }}">
+                {{ it.codigo_proveedor or it.codigo or '—' }}
+              </td>
+              <td>
+                {{ it.nombre }}
+                {% if it.hay_alternativas %}
+                  <span class="badge bg-success" title="Es el precio más bajo entre los proveedores cargados para este producto">mejor precio</span>
+                {% endif %}
+              </td>
+              <td class="text-end {{ 'text-danger fw-bold' if it.stock_actual <= 0 else '' }}">{{ it.stock_actual }}</td>
+              <td class="text-end text-muted">{{ it.stock_minimo }}</td>
+              <td class="text-end fw-bold">{{ it.sugerido }}</td>
+              <td class="text-end">{{ it.precio_costo|money }}</td>
+              <td class="text-end">{{ it.costo_estimado|money }}</td>
+            </tr>
+          {% endfor %}
+          </tbody>
+        </table>
+        <button type="submit" class="btn btn-sm btn-outline-primary no-print">
+          <i class="bi bi-check2-square"></i> Marcar todo esto como ya pedido a {{ proveedor }}
+        </button>
+      </form>
+    </div>
+  {% endfor %}
+
+  <div class="card p-3">
+    <div class="d-flex justify-content-between align-items-center">
+      <h5 class="mb-0">Total estimado de reposición</h5>
+      <h4 class="mb-0">{{ total_general|money }}</h4>
+    </div>
+  </div>
+{% else %}
+  <div class="card p-5 text-center">
+    <div class="mb-2"><i class="bi bi-check-circle text-success" style="font-size: 2.5rem;"></i></div>
+    <h5>No hay nada para reponer</h5>
+    <p class="text-muted mb-0">Todos los productos están por encima de su stock mínimo (o ya están pedidos).</p>
+  </div>
+{% endif %}
+
+{% if pendientes %}
+  <div class="card p-4 mt-4 no-print">
+    <h6 class="mb-3"><i class="bi bi-truck"></i> Ya pedidos, esperando que lleguen</h6>
+    <table class="table table-sm align-middle mb-0">
+      <thead><tr><th>Código</th><th>Producto</th><th>Pedido el</th><th></th></tr></thead>
+      <tbody>
+      {% for p in pendientes %}
+        <tr>
+          <td>{{ p.codigo or '—' }}</td>
+          <td>{{ p.nombre }}</td>
+          <td class="text-muted">{{ p.fecha_pedido_pendiente }}</td>
+          <td class="text-end">
+            <form method="post" action="{{ url_for('pedidos_desmarcar', producto_id=p.id) }}">
+              <button class="btn btn-sm btn-outline-secondary" title="Sacar la marca (vuelve a la lista de faltantes si sigue bajo el mínimo)">
+                <i class="bi bi-x-lg"></i> Desmarcar
+              </button>
+            </form>
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+    <div class="form-text">Esto se limpia solo cuando registrás la compra (Nueva compra o importar factura) y llega el stock.</div>
+  </div>
+{% endif %}
+
+{% endblock %}
