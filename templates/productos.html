@@ -24,16 +24,16 @@
     </select>
   </div>
   <div class="col-md-2">
-    <input type="text" name="marca" id="marcaFiltro" value="{{ marca }}" class="form-control" list="marcasDatalist" placeholder="Marca...">
-    <datalist id="marcasDatalist">
-      {% for m in marcas_disponibles %}
+    <input type="text" name="modelo" id="modeloFiltro" value="{{ modelo }}" class="form-control" list="modelosDatalist" placeholder="Modelo de auto...">
+    <datalist id="modelosDatalist">
+      {% for m in modelos_disponibles %}
         <option value="{{ m }}">
       {% endfor %}
     </datalist>
   </div>
   <div class="col-12">
     <button type="submit" class="btn btn-outline-primary btn-sm"><i class="bi bi-funnel"></i> Filtrar</button>
-    {% if q or categoria or subcategoria or marca %}
+    {% if q or categoria or subcategoria or modelo %}
       <a href="{{ url_for('productos_lista') }}" class="btn btn-link btn-sm">Limpiar filtros</a>
     {% endif %}
   </div>

@@ -720,7 +720,7 @@ def productos_lista():
     q = request.args.get("q", "").strip()
     categoria = request.args.get("categoria", "").strip()
     subcategoria = request.args.get("subcategoria", "").strip()
-    marca = request.args.get("marca", "").strip()
+    modelo = request.args.get("modelo", "").strip()
 
     condiciones = []
     parametros = []
@@ -733,11 +733,12 @@ def productos_lista():
     if subcategoria:
         condiciones.append("subcategoria = ?")
         parametros.append(subcategoria)
-    if marca:
-        # cubre tanto productos con `marca` cargada como los que la tienen
-        # embebida en el nombre (listas de proveedores sin ese campo separado)
-        condiciones.append("(marca LIKE ? OR nombre LIKE ?)")
-        parametros += [f"%{marca}%", f"%{marca}%"]
+    if modelo:
+        # coincidencia parcial: modelo_compatible suele traer varios autos
+        # juntos (ej. "VW Gol / Voyage"), así que buscar "Gol" tiene que
+        # encontrar ese producto igual, no exigir el campo completo.
+        condiciones.append("modelo_compatible LIKE ?")
+        parametros.append(f"%{modelo}%")
 
     consulta = "SELECT * FROM productos"
     if condiciones:
@@ -747,16 +748,16 @@ def productos_lista():
 
     categorias = db.obtener_categorias(conn)
     subcategorias_json = subcategorias_por_categoria_json(conn)
-    marcas_disponibles = [
-        r["marca"] for r in conn.execute(
-            "SELECT DISTINCT marca FROM productos WHERE marca IS NOT NULL AND marca != '' ORDER BY marca"
+    modelos_disponibles = [
+        r["modelo_compatible"] for r in conn.execute(
+            "SELECT DISTINCT modelo_compatible FROM productos WHERE modelo_compatible IS NOT NULL AND modelo_compatible != '' ORDER BY modelo_compatible"
         )
     ]
     conn.close()
     return render_template(
         "productos.html", productos=productos, q=q, categoria=categoria, subcategoria=subcategoria,
-        marca=marca, categorias=categorias, subcategorias_json=subcategorias_json,
-        marcas_disponibles=marcas_disponibles,
+        modelo=modelo, categorias=categorias, subcategorias_json=subcategorias_json,
+        modelos_disponibles=modelos_disponibles,
     )
 
 
