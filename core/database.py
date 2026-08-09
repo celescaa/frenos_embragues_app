@@ -170,6 +170,67 @@ CREATE TABLE IF NOT EXISTS usuarios (
     bloqueado_hasta TEXT,
     fecha_creacion TEXT NOT NULL
 );
+
+-- Cuenta corriente de clientes (típicamente mecánicos que compran a crédito).
+-- cliente_tercero_nombre es solo texto de referencia (para qué auto/cliente
+-- final fue el repuesto), no crea una ficha de cliente aparte.
+CREATE TABLE IF NOT EXISTS cuenta_corriente_movimientos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    cliente_id INTEGER NOT NULL,
+    cliente_tercero_nombre TEXT,
+    producto_id INTEGER,
+    monto REAL NOT NULL,
+    tipo TEXT NOT NULL,
+    fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    venta_id INTEGER,
+    observaciones TEXT,
+    cae TEXT,
+    cae_vencimiento TEXT,
+    punto_venta_arca INTEGER,
+    numero_factura_arca INTEGER,
+    facturacion_estado TEXT,
+    facturacion_error TEXT,
+    FOREIGN KEY (cliente_id) REFERENCES clientes(id),
+    FOREIGN KEY (producto_id) REFERENCES productos(id),
+    FOREIGN KEY (venta_id) REFERENCES ventas(id)
+);
+
+-- Compras/ventas sin factura (no pasan por compras/ventas ni por AFIP), pero
+-- sí impactan el mismo stock_actual que todo lo demás.
+CREATE TABLE IF NOT EXISTS movimientos_no_facturados (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    tipo TEXT NOT NULL,
+    producto_id INTEGER NOT NULL,
+    cantidad INTEGER NOT NULL,
+    precio REAL NOT NULL DEFAULT 0,
+    contraparte TEXT,
+    observaciones TEXT,
+    conciliado INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (producto_id) REFERENCES productos(id)
+);
+
+-- Descuentos aprobados manualmente para un cliente puntual (ver /clientes/top).
+CREATE TABLE IF NOT EXISTS promociones_aplicadas (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    cliente_id INTEGER NOT NULL,
+    porcentaje_o_monto REAL NOT NULL,
+    tipo TEXT NOT NULL,
+    alcance TEXT NOT NULL,
+    fecha_inicio TEXT NOT NULL,
+    fecha_fin TEXT,
+    aprobado_por TEXT,
+    fecha_aprobacion TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (cliente_id) REFERENCES clientes(id)
+);
+
+CREATE TABLE IF NOT EXISTS promocion_productos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    promocion_id INTEGER NOT NULL,
+    producto_id INTEGER NOT NULL,
+    FOREIGN KEY (promocion_id) REFERENCES promociones_aplicadas(id),
+    FOREIGN KEY (producto_id) REFERENCES productos(id)
+);
 """
 
 
@@ -310,6 +371,7 @@ def _migrar(conn):
             ("subcategoria", "TEXT"),
         ],
         "proveedores": [("activo", "INTEGER NOT NULL DEFAULT 1")],
+        "clientes": [("tipo_cliente", "TEXT NOT NULL DEFAULT 'particular'")],
         "ventas": [
             ("cae", "TEXT"),
             ("cae_vencimiento", "TEXT"),
@@ -317,6 +379,10 @@ def _migrar(conn):
             ("numero_factura_arca", "INTEGER"),
             ("facturacion_estado", "TEXT"),
             ("facturacion_error", "TEXT"),
+            # vincula dos ventas que son en realidad un mismo pago mixto
+            # (ej. mitad efectivo, mitad tarjeta) para no contarlas dos veces
+            # en "cantidad de ventas" — ver /ventas/dia.
+            ("id_operacion", "TEXT"),
         ],
     }
     for tabla, columnas in columnas_nuevas.items():

@@ -3,7 +3,10 @@
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3">
   <h4 class="mb-0"><i class="bi bi-people"></i> Clientes</h4>
-  <a href="{{ url_for('clientes_nuevo') }}" class="btn btn-primary"><i class="bi bi-plus-lg"></i> Nuevo cliente</a>
+  <div>
+    <a href="{{ url_for('clientes_top') }}" class="btn btn-outline-primary"><i class="bi bi-trophy"></i> Top clientes</a>
+    <a href="{{ url_for('clientes_nuevo') }}" class="btn btn-primary"><i class="bi bi-plus-lg"></i> Nuevo cliente</a>
+  </div>
 </div>
 
 <form class="mb-3" method="get">
@@ -13,18 +16,22 @@
 <div class="card p-3">
   <table class="table table-hover align-middle mb-0">
     <thead>
-      <tr><th>Nombre</th><th>Teléfono</th><th>Email</th><th>Dirección</th><th>CUIT/DNI</th><th>Alta</th><th></th></tr>
+      <tr><th>Nombre</th><th>Tipo</th><th>Teléfono</th><th>Email</th><th>Dirección</th><th>CUIT/DNI</th><th>Alta</th><th></th></tr>
     </thead>
     <tbody>
     {% for c in clientes %}
       <tr>
         <td>{{ c.nombre }}</td>
+        <td>{% if c.tipo_cliente == 'mecanico' %}<span class="badge bg-secondary">Mecánico</span>{% else %}Particular{% endif %}</td>
         <td>{{ c.telefono }}</td>
         <td>{{ c.email }}</td>
         <td>{{ c.direccion }}</td>
         <td>{{ c.cuit_dni }}</td>
         <td>{{ c.fecha_alta }}</td>
         <td class="text-end">
+          {% if c.tipo_cliente == 'mecanico' %}
+            <a href="{{ url_for('cuenta_corriente_ver', cliente_id=c.id) }}" class="btn btn-sm btn-outline-primary" title="Cuenta corriente"><i class="bi bi-journal-text"></i></a>
+          {% endif %}
           <a href="{{ url_for('clientes_editar', cliente_id=c.id) }}" class="btn btn-sm btn-outline-secondary"><i class="bi bi-pencil"></i></a>
           <form method="post" action="{{ url_for('clientes_eliminar', cliente_id=c.id) }}" class="d-inline" onsubmit="return confirm('¿Eliminar este cliente?');">
             <button class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>
@@ -32,7 +39,7 @@
         </td>
       </tr>
     {% else %}
-      <tr><td colspan="7" class="text-center text-muted py-4">No hay clientes cargados todavía.</td></tr>
+      <tr><td colspan="8" class="text-center text-muted py-4">No hay clientes cargados todavía.</td></tr>
     {% endfor %}
     </tbody>
   </table>

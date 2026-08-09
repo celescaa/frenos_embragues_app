@@ -1,0 +1,153 @@
+{% extends "base.html" %}
+{% block title %}Top clientes | Frenos & Embragues{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mb-0"><i class="bi bi-trophy"></i> Top clientes</h4>
+  <a href="{{ url_for('clientes_lista') }}" class="btn btn-link">Volver a Clientes</a>
+</div>
+
+<form class="row g-2 mb-3" method="get">
+  <div class="col-auto">
+    <select name="periodo" class="form-select" onchange="this.form.submit()">
+      {% for valor, etiqueta in periodos.items() %}
+        <option value="{{ valor }}" {{ 'selected' if periodo == valor else '' }}>{{ etiqueta }}</option>
+      {% endfor %}
+    </select>
+  </div>
+</form>
+
+<div class="card p-3 mb-4">
+  <table class="table table-hover align-middle mb-0">
+    <thead>
+      <tr><th>#</th><th>Cliente</th><th>Tipo</th><th class="text-end">Compras</th><th class="text-end">Total</th><th class="text-end">Margen estimado</th><th></th></tr>
+    </thead>
+    <tbody>
+    {% for c in ranking %}
+      <tr>
+        <td>{{ loop.index }}</td>
+        <td>{{ c.nombre }}</td>
+        <td>{% if c.tipo_cliente == 'mecanico' %}<span class="badge bg-secondary">Mecánico</span>{% else %}Particular{% endif %}</td>
+        <td class="text-end">{{ c.cant_compras }}</td>
+        <td class="text-end">{{ c.total|money }}</td>
+        <td class="text-end">{{ margenes[c.id]|money }}</td>
+        <td class="text-end">
+          <button type="button" class="btn btn-sm btn-outline-primary" data-bs-toggle="modal"
+                  data-bs-target="#modalPromocion" onclick="prepararModalPromocion({{ c.id }}, '{{ c.nombre|e }}')">
+            <i class="bi bi-tag"></i> Aplicar promoción
+          </button>
+        </td>
+      </tr>
+    {% else %}
+      <tr><td colspan="7" class="text-center text-muted py-4">No hay ventas registradas en este período.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <div class="form-text mt-2">El margen estimado usa el costo <strong>actual</strong> de cada producto (puede diferir del costo real al momento de la venta) — es una referencia para decidir el descuento, no un número contable exacto.</div>
+</div>
+
+<div class="card p-3">
+  <h6 class="mb-3">Promociones vigentes</h6>
+  {% if promociones_vigentes %}
+  <table class="table table-sm mb-0">
+    <thead><tr><th>Cliente</th><th>Descuento</th><th>Alcance</th><th>Desde</th><th>Hasta</th><th>Aprobado por</th><th></th></tr></thead>
+    <tbody>
+    {% for p in promociones_vigentes %}
+      <tr>
+        <td>{{ p.cliente_nombre }}</td>
+        <td>{% if p.tipo == 'porcentaje' %}{{ p.porcentaje_o_monto }}%{% else %}{{ p.porcentaje_o_monto|money }}{% endif %}</td>
+        <td>{{ 'Todo el catálogo' if p.alcance == 'todo' else 'Productos puntuales' }}</td>
+        <td>{{ p.fecha_inicio }}</td>
+        <td>{{ p.fecha_fin or 'Sin vencimiento' }}</td>
+        <td>{{ p.aprobado_por or '' }}</td>
+        <td class="text-end">
+          <form method="post" action="{{ url_for('promocion_finalizar', promocion_id=p.id) }}" onsubmit="return confirm('¿Finalizar esta promoción ahora?');">
+            <button class="btn btn-sm btn-outline-danger">Finalizar</button>
+          </form>
+        </td>
+      </tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  {% else %}
+    <p class="text-muted mb-0">No hay promociones vigentes en este momento.</p>
+  {% endif %}
+</div>
+
+<div class="modal fade" id="modalPromocion" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form method="post" id="formPromocion">
+        <div class="modal-header">
+          <h5 class="modal-title"><i class="bi bi-tag"></i> Aplicar promoción a <span id="promoClienteNombre"></span></h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
+        </div>
+        <div class="modal-body">
+          <input type="hidden" name="periodo" value="{{ periodo }}">
+          <div class="row">
+            <div class="col-md-6 mb-3">
+              <label class="form-label">Tipo de descuento</label>
+              <select name="tipo" id="promoTipo" class="form-select">
+                <option value="porcentaje">Porcentaje</option>
+                <option value="monto_fijo">Monto fijo</option>
+              </select>
+            </div>
+            <div class="col-md-6 mb-3">
+              <label class="form-label" id="promoValorLabel">Porcentaje (%)</label>
+              <input type="number" step="0.01" name="porcentaje_o_monto" class="form-control" required>
+            </div>
+          </div>
+          <div class="mb-3">
+            <label class="form-label">Alcance</label>
+            <select name="alcance" id="promoAlcance" class="form-select">
+              <option value="todo">Todo el catálogo</option>
+              <option value="productos_puntuales">Productos puntuales</option>
+            </select>
+          </div>
+          <div id="promoProductosBloque" class="mb-3" style="display:none;">
+            <label class="form-label">Productos alcanzados</label>
+            <select name="producto_id" class="form-select" multiple size="8">
+              {% for p in productos %}
+                <option value="{{ p.id }}">{{ p.nombre }} ({{ p.codigo or 's/código' }})</option>
+              {% endfor %}
+            </select>
+            <div class="form-text">Mantené Ctrl (o Cmd) apretado para elegir varios.</div>
+          </div>
+          <div class="row">
+            <div class="col-md-6 mb-3">
+              <label class="form-label">Vigente desde</label>
+              <input type="date" name="fecha_inicio" class="form-control">
+            </div>
+            <div class="col-md-6 mb-3">
+              <label class="form-label">Vigente hasta (opcional)</label>
+              <input type="date" name="fecha_fin" class="form-control">
+            </div>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-link" data-bs-dismiss="modal">Cancelar</button>
+          <button type="submit" class="btn btn-primary">Aplicar promoción</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+function prepararModalPromocion(clienteId, clienteNombre) {
+  document.getElementById('promoClienteNombre').textContent = clienteNombre;
+  document.getElementById('formPromocion').action = '/clientes/' + clienteId + '/promocion/nueva';
+  const hoy = new Date().toISOString().slice(0, 10);
+  document.querySelector('input[name="fecha_inicio"]').value = hoy;
+}
+
+document.getElementById('promoTipo').addEventListener('change', function() {
+  document.getElementById('promoValorLabel').textContent = this.value === 'porcentaje' ? 'Porcentaje (%)' : 'Monto fijo ($)';
+});
+
+document.getElementById('promoAlcance').addEventListener('change', function() {
+  document.getElementById('promoProductosBloque').style.display = this.value === 'productos_puntuales' ? '' : 'none';
+});
+</script>
+{% endblock %}

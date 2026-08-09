@@ -408,13 +408,15 @@ def clientes_nuevo():
     if request.method == "POST":
         conn = db.get_connection()
         conn.execute(
-            "INSERT INTO clientes (nombre, telefono, email, direccion, cuit_dni, fecha_alta) VALUES (?, ?, ?, ?, ?, ?)",
+            """INSERT INTO clientes (nombre, telefono, email, direccion, cuit_dni, tipo_cliente, fecha_alta)
+               VALUES (?, ?, ?, ?, ?, ?, ?)""",
             (
                 request.form["nombre"],
                 request.form.get("telefono", ""),
                 request.form.get("email", ""),
                 request.form.get("direccion", ""),
                 request.form.get("cuit_dni", ""),
+                request.form.get("tipo_cliente", "particular"),
                 datetime.now().strftime("%Y-%m-%d"),
             ),
         )
@@ -430,13 +432,14 @@ def clientes_editar(cliente_id):
     conn = db.get_connection()
     if request.method == "POST":
         conn.execute(
-            "UPDATE clientes SET nombre=?, telefono=?, email=?, direccion=?, cuit_dni=? WHERE id=?",
+            "UPDATE clientes SET nombre=?, telefono=?, email=?, direccion=?, cuit_dni=?, tipo_cliente=? WHERE id=?",
             (
                 request.form["nombre"],
                 request.form.get("telefono", ""),
                 request.form.get("email", ""),
                 request.form.get("direccion", ""),
                 request.form.get("cuit_dni", ""),
+                request.form.get("tipo_cliente", "particular"),
                 cliente_id,
             ),
         )
@@ -457,6 +460,230 @@ def clientes_eliminar(cliente_id):
     conn.close()
     flash("Cliente eliminado.", "info")
     return redirect(url_for("clientes_lista"))
+
+
+# ---------------------------------------------------------------------------
+# Cuenta corriente de clientes (típicamente mecánicos que compran a crédito
+# para un tercero — el auto/cliente final queda solo como referencia).
+# ---------------------------------------------------------------------------
+@app.route("/clientes/<int:cliente_id>/cuenta-corriente")
+def cuenta_corriente_ver(cliente_id):
+    conn = db.get_connection()
+    cliente = conn.execute("SELECT * FROM clientes WHERE id=?", (cliente_id,)).fetchone()
+    if not cliente:
+        conn.close()
+        flash("No encontré ese cliente.", "danger")
+        return redirect(url_for("clientes_lista"))
+    movimientos = conn.execute(
+        """SELECT m.*, p.nombre AS producto_nombre FROM cuenta_corriente_movimientos m
+           LEFT JOIN productos p ON p.id = m.producto_id
+           WHERE m.cliente_id=? ORDER BY m.fecha DESC, m.id DESC""",
+        (cliente_id,),
+    ).fetchall()
+    saldo = sum(m["monto"] if m["tipo"] == "cargo" else -m["monto"] for m in movimientos)
+    productos = conn.execute("SELECT * FROM productos ORDER BY nombre").fetchall()
+    conn.close()
+    return render_template(
+        "cuenta_corriente.html", cliente=cliente, movimientos=movimientos, saldo=saldo,
+        productos_json=productos_para_buscador(productos),
+        umbral_identificacion=facturacion_afip.UMBRAL_IDENTIFICACION_RECEPTOR,
+    )
+
+
+@app.route("/clientes/<int:cliente_id>/cuenta-corriente/nueva", methods=["POST"])
+def cuenta_corriente_nueva(cliente_id):
+    conn = db.get_connection()
+    cliente = conn.execute("SELECT * FROM clientes WHERE id=?", (cliente_id,)).fetchone()
+    if not cliente:
+        conn.close()
+        flash("No encontré ese cliente.", "danger")
+        return redirect(url_for("clientes_lista"))
+
+    tipo = request.form.get("tipo", "cargo")
+    if tipo not in ("cargo", "pago"):
+        tipo = "cargo"
+    try:
+        monto = float(request.form.get("monto") or 0)
+    except ValueError:
+        monto = 0
+    if monto <= 0:
+        flash("El monto tiene que ser mayor a cero.", "danger")
+        conn.close()
+        return redirect(url_for("cuenta_corriente_ver", cliente_id=cliente_id))
+
+    if (
+        tipo == "cargo"
+        and monto > facturacion_afip.UMBRAL_IDENTIFICACION_RECEPTOR
+        and not (cliente["cuit_dni"] or "").strip()
+    ):
+        flash(
+            f"Este cargo supera el monto a partir del cual ARCA exige identificar al receptor. "
+            f"Cargá el CUIT/DNI de {cliente['nombre']} en su ficha antes de continuar.",
+            "danger",
+        )
+        conn.close()
+        return redirect(url_for("cuenta_corriente_ver", cliente_id=cliente_id))
+
+    producto_id = request.form.get("producto_id") or None
+    cliente_tercero_nombre = request.form.get("cliente_tercero_nombre", "").strip() or None
+    observaciones = request.form.get("observaciones", "").strip() or None
+
+    cur = conn.execute(
+        """INSERT INTO cuenta_corriente_movimientos
+           (cliente_id, cliente_tercero_nombre, producto_id, monto, tipo, observaciones)
+           VALUES (?, ?, ?, ?, ?, ?)""",
+        (cliente_id, cliente_tercero_nombre, producto_id, monto, tipo, observaciones),
+    )
+    movimiento_id = cur.lastrowid
+    conn.commit()
+    conn.close()
+
+    if tipo == "cargo":
+        # Nunca bloquea ni revierte el movimiento si ARCA falla: se puede
+        # reintentar después desde esta misma pantalla (igual criterio que
+        # con la Factura C de una venta del local).
+        facturacion_afip.emitir_factura_c_movimiento(movimiento_id)
+
+    flash("Movimiento registrado en la cuenta corriente.", "success")
+    return redirect(url_for("cuenta_corriente_ver", cliente_id=cliente_id))
+
+
+@app.route("/clientes/<int:cliente_id>/cuenta-corriente/<int:movimiento_id>/facturar", methods=["POST"])
+def cuenta_corriente_facturar(cliente_id, movimiento_id):
+    """Reintento manual de la Factura C de un cargo de cuenta corriente."""
+    facturacion_afip.emitir_factura_c_movimiento(movimiento_id)
+    conn = db.get_connection()
+    estado = conn.execute(
+        "SELECT facturacion_estado, facturacion_error FROM cuenta_corriente_movimientos WHERE id=?",
+        (movimiento_id,),
+    ).fetchone()
+    conn.close()
+    if not estado:
+        flash("No encontré ese movimiento.", "danger")
+    elif estado["facturacion_estado"] == "emitida":
+        flash("Factura C emitida correctamente.", "success")
+    elif estado["facturacion_estado"] == "sin_configurar":
+        flash("Todavía no está configurado el acceso a Afip SDK (AFIPSDK_ACCESS_TOKEN). Ver README.md.", "warning")
+    else:
+        flash("No se pudo emitir la Factura C: %s" % (estado["facturacion_error"] or "error desconocido"), "danger")
+    return redirect(url_for("cuenta_corriente_ver", cliente_id=cliente_id))
+
+
+# ---------------------------------------------------------------------------
+# Ranking de clientes + descuentos aprobados manualmente
+# ---------------------------------------------------------------------------
+PERIODOS_RANKING = {"30": "Últimos 30 días", "90": "Últimos 90 días", "365": "Último año", "todo": "Histórico"}
+
+
+@app.route("/clientes/top")
+def clientes_top():
+    conn = db.get_connection()
+    periodo = request.args.get("periodo", "90")
+    if periodo not in PERIODOS_RANKING:
+        periodo = "90"
+
+    parametros = []
+    condicion_fecha = ""
+    if periodo != "todo":
+        desde = (datetime.now() - timedelta(days=int(periodo))).strftime("%Y-%m-%d")
+        condicion_fecha = "WHERE v.fecha >= ?"
+        parametros = [desde]
+
+    ranking = conn.execute(
+        f"""SELECT c.id, c.nombre, c.tipo_cliente, COUNT(v.id) AS cant_compras, SUM(v.total) AS total
+            FROM ventas v JOIN clientes c ON c.id = v.cliente_id
+            {condicion_fecha}
+            GROUP BY v.cliente_id ORDER BY total DESC LIMIT 5""",
+        parametros,
+    ).fetchall()
+
+    # Margen estimado con el costo ACTUAL de cada producto (aproximación:
+    # el costo real al momento de la venta pudo ser distinto si cambió
+    # desde entonces). Sirve como referencia para quien aprueba el descuento,
+    # no como número contable exacto.
+    margenes = {}
+    for r in ranking:
+        params_margen = [r["id"]] + parametros
+        margen = conn.execute(
+            f"""SELECT COALESCE(SUM(vi.cantidad * (vi.precio_unitario - p.precio_costo)), 0) AS margen
+                FROM venta_items vi JOIN ventas v ON v.id = vi.venta_id JOIN productos p ON p.id = vi.producto_id
+                WHERE v.cliente_id = ? {"AND v.fecha >= ?" if condicion_fecha else ""}""",
+            params_margen,
+        ).fetchone()
+        margenes[r["id"]] = margen["margen"]
+
+    promociones_vigentes = conn.execute(
+        """SELECT pa.*, c.nombre AS cliente_nombre FROM promociones_aplicadas pa
+           JOIN clientes c ON c.id = pa.cliente_id
+           WHERE fecha_inicio <= date('now') AND (fecha_fin IS NULL OR fecha_fin >= date('now'))
+           ORDER BY fecha_aprobacion DESC"""
+    ).fetchall()
+
+    productos = conn.execute("SELECT * FROM productos ORDER BY nombre").fetchall()
+    conn.close()
+    return render_template(
+        "clientes_top.html", ranking=ranking, margenes=margenes, periodo=periodo, periodos=PERIODOS_RANKING,
+        promociones_vigentes=promociones_vigentes, productos=productos,
+    )
+
+
+@app.route("/clientes/<int:cliente_id>/promocion/nueva", methods=["POST"])
+def promocion_nueva(cliente_id):
+    """Aplica manualmente un descuento aprobado a un cliente (ver
+    /clientes/top). Se usa en registrar_venta() -> aplicar_promociones()
+    para el resto de las ventas mientras esté vigente."""
+    conn = db.get_connection()
+    tipo = request.form.get("tipo", "porcentaje")
+    if tipo not in ("porcentaje", "monto_fijo"):
+        tipo = "porcentaje"
+    try:
+        porcentaje_o_monto = float(request.form.get("porcentaje_o_monto") or 0)
+    except ValueError:
+        porcentaje_o_monto = 0
+    alcance = request.form.get("alcance", "todo")
+    if alcance not in ("todo", "productos_puntuales"):
+        alcance = "todo"
+    fecha_inicio = request.form.get("fecha_inicio") or datetime.now().strftime("%Y-%m-%d")
+    fecha_fin = request.form.get("fecha_fin") or None
+    aprobado_por = session.get("usuario_nombre")
+
+    if porcentaje_o_monto <= 0:
+        flash("El valor del descuento tiene que ser mayor a cero.", "danger")
+        conn.close()
+        return redirect(url_for("clientes_top"))
+
+    cur = conn.execute(
+        """INSERT INTO promociones_aplicadas
+           (cliente_id, porcentaje_o_monto, tipo, alcance, fecha_inicio, fecha_fin, aprobado_por)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (cliente_id, porcentaje_o_monto, tipo, alcance, fecha_inicio, fecha_fin, aprobado_por),
+    )
+    promocion_id = cur.lastrowid
+
+    if alcance == "productos_puntuales":
+        for producto_id in request.form.getlist("producto_id"):
+            conn.execute(
+                "INSERT INTO promocion_productos (promocion_id, producto_id) VALUES (?, ?)",
+                (promocion_id, producto_id),
+            )
+
+    conn.commit()
+    conn.close()
+    flash("Promoción aplicada.", "success")
+    return redirect(url_for("clientes_top", periodo=request.form.get("periodo", "90")))
+
+
+@app.route("/promociones/<int:promocion_id>/finalizar", methods=["POST"])
+def promocion_finalizar(promocion_id):
+    conn = db.get_connection()
+    conn.execute(
+        "UPDATE promociones_aplicadas SET fecha_fin=? WHERE id=?",
+        (datetime.now().strftime("%Y-%m-%d"), promocion_id),
+    )
+    conn.commit()
+    conn.close()
+    flash("Promoción finalizada.", "info")
+    return redirect(url_for("clientes_top"))
 
 
 def guardar_cotizaciones_proveedor(conn, producto_id, form):
@@ -491,17 +718,46 @@ def guardar_cotizaciones_proveedor(conn, producto_id, form):
 def productos_lista():
     conn = db.get_connection()
     q = request.args.get("q", "").strip()
+    categoria = request.args.get("categoria", "").strip()
+    subcategoria = request.args.get("subcategoria", "").strip()
+    marca = request.args.get("marca", "").strip()
+
+    condiciones = []
+    parametros = []
     if q:
-        productos = conn.execute(
-            """SELECT * FROM productos
-               WHERE nombre LIKE ? OR codigo LIKE ? OR marca LIKE ? OR codigo_barras = ?
-               ORDER BY nombre""",
-            (f"%{q}%", f"%{q}%", f"%{q}%", q),
-        ).fetchall()
-    else:
-        productos = conn.execute("SELECT * FROM productos ORDER BY categoria, nombre").fetchall()
+        condiciones.append("(nombre LIKE ? OR codigo LIKE ? OR marca LIKE ? OR codigo_barras = ?)")
+        parametros += [f"%{q}%", f"%{q}%", f"%{q}%", q]
+    if categoria:
+        condiciones.append("categoria = ?")
+        parametros.append(categoria)
+    if subcategoria:
+        condiciones.append("subcategoria = ?")
+        parametros.append(subcategoria)
+    if marca:
+        # cubre tanto productos con `marca` cargada como los que la tienen
+        # embebida en el nombre (listas de proveedores sin ese campo separado)
+        condiciones.append("(marca LIKE ? OR nombre LIKE ?)")
+        parametros += [f"%{marca}%", f"%{marca}%"]
+
+    consulta = "SELECT * FROM productos"
+    if condiciones:
+        consulta += " WHERE " + " AND ".join(condiciones)
+    consulta += " ORDER BY categoria, nombre"
+    productos = conn.execute(consulta, parametros).fetchall()
+
+    categorias = db.obtener_categorias(conn)
+    subcategorias_json = subcategorias_por_categoria_json(conn)
+    marcas_disponibles = [
+        r["marca"] for r in conn.execute(
+            "SELECT DISTINCT marca FROM productos WHERE marca IS NOT NULL AND marca != '' ORDER BY marca"
+        )
+    ]
     conn.close()
-    return render_template("productos.html", productos=productos, q=q)
+    return render_template(
+        "productos.html", productos=productos, q=q, categoria=categoria, subcategoria=subcategoria,
+        marca=marca, categorias=categorias, subcategorias_json=subcategorias_json,
+        marcas_disponibles=marcas_disponibles,
+    )
 
 
 @app.route("/productos/nuevo", methods=["GET", "POST"])
@@ -888,21 +1144,114 @@ def ventas_lista():
     return render_template("ventas.html", ventas=ventas)
 
 
-def registrar_venta(conn, cliente_id, metodo_pago, items, tipo_comprobante_solicitado="Remito"):
+@app.route("/ventas/dia")
+def ventas_dia():
+    """Resumen de ventas de un día agrupado por medio de pago (efectivo,
+    transferencia, tarjeta, Mercado Pago), para el arqueo del local."""
+    conn = db.get_connection()
+    fecha = request.args.get("fecha", "").strip() or datetime.now().strftime("%Y-%m-%d")
+
+    resumen = conn.execute(
+        """SELECT metodo_pago, COUNT(*) AS cantidad, COALESCE(SUM(total),0) AS total
+           FROM ventas WHERE fecha = ? GROUP BY metodo_pago ORDER BY total DESC""",
+        (fecha,),
+    ).fetchall()
+    total_dia = sum(r["total"] for r in resumen)
+
+    # Cantidad de operaciones reales del día: si dos ventas comparten
+    # id_operacion (un mismo pago dividido en efectivo + tarjeta, por
+    # ejemplo) cuentan como una sola, no dos.
+    cant_operaciones = conn.execute(
+        "SELECT COUNT(DISTINCT COALESCE(id_operacion, 'v' || id)) AS c FROM ventas WHERE fecha = ?",
+        (fecha,),
+    ).fetchone()["c"]
+
+    ventas = conn.execute(
+        """SELECT v.*, c.nombre AS cliente_nombre
+           FROM ventas v LEFT JOIN clientes c ON c.id = v.cliente_id
+           WHERE v.fecha = ? ORDER BY v.id DESC""",
+        (fecha,),
+    ).fetchall()
+    conn.close()
+    return render_template(
+        "ventas_dia.html", fecha=fecha, resumen=resumen, total_dia=total_dia,
+        cant_operaciones=cant_operaciones, ventas=ventas,
+    )
+
+
+def _promociones_vigentes_cliente(conn, cliente_id):
+    hoy = datetime.now().strftime("%Y-%m-%d")
+    return conn.execute(
+        """SELECT * FROM promociones_aplicadas
+           WHERE cliente_id=? AND fecha_inicio<=? AND (fecha_fin IS NULL OR fecha_fin>=?)""",
+        (cliente_id, hoy, hoy),
+    ).fetchall()
+
+
+def aplicar_promociones(conn, cliente_id, items):
+    """Ajusta precios/subtotales de `items` según las promociones vigentes
+    del cliente (ver /clientes/top -> "Aplicar promoción"). Descuentos
+    porcentuales se aplican por ítem alcanzado; descuentos de monto fijo
+    (solo con alcance 'todo') se prorratean sobre el total de la venta.
+    `items` es una lista de tuplas (producto_id, cantidad, precio_unitario,
+    subtotal); devuelve una lista nueva con la misma forma."""
+    if not cliente_id:
+        return items
+    promos = _promociones_vigentes_cliente(conn, cliente_id)
+    if not promos:
+        return items
+
+    productos_con_promo_puntual = {}
+    for promo in promos:
+        if promo["alcance"] == "productos_puntuales":
+            for f in conn.execute(
+                "SELECT producto_id FROM promocion_productos WHERE promocion_id=?", (promo["id"],)
+            ):
+                productos_con_promo_puntual.setdefault(f["producto_id"], []).append(promo)
+
+    nuevos = []
+    for producto_id, cant, precio_unitario, subtotal in items:
+        aplicables = [p for p in promos if p["alcance"] == "todo"] + productos_con_promo_puntual.get(producto_id, [])
+        porcentaje = max([p["porcentaje_o_monto"] for p in aplicables if p["tipo"] == "porcentaje"], default=0)
+        precio_final = round(precio_unitario * (1 - porcentaje / 100), 2) if porcentaje else precio_unitario
+        nuevos.append((producto_id, cant, precio_final, round(cant * precio_final, 2)))
+
+    monto_fijo = max(
+        [p["porcentaje_o_monto"] for p in promos if p["tipo"] == "monto_fijo" and p["alcance"] == "todo"], default=0
+    )
+    total_previo = sum(it[3] for it in nuevos)
+    if monto_fijo and total_previo > 0:
+        factor = max(0, total_previo - monto_fijo) / total_previo
+        nuevos = [
+            (pid, cant, round(pu * factor, 2), round(cant * pu * factor, 2))
+            for pid, cant, pu, _ in nuevos
+        ]
+
+    return nuevos
+
+
+def registrar_venta(conn, cliente_id, metodo_pago, items, tipo_comprobante_solicitado="Remito", id_operacion=None):
     """Inserta una venta + sus items y descuenta stock. Usado tanto por la
     venta manual del local (Nueva venta) como por la tienda online una vez
     que Mercado Pago confirma el pago — es la misma tabla, el mismo stock,
     una sola fuente de verdad.
 
     `items` es una lista de tuplas (producto_id, cantidad, precio_unitario,
-    subtotal) ya resueltas por quien llama.
+    subtotal) ya resueltas por quien llama. Si el cliente tiene una
+    promoción vigente (ver /clientes/top), el precio unitario se ajusta acá
+    antes de calcular el total.
 
     Regla del negocio: efectivo -> remito/recibo interno (el que se haya
     pedido); tarjeta, transferencia o Mercado Pago -> Factura C electrónica
     automática por ARCA.
 
+    `id_operacion` es opcional: dos ventas registradas con el mismo valor se
+    cuentan como una sola operación en /ventas/dia (pago mixto).
+
     Devuelve (venta_id, tipo_comprobante_final).
     """
+    items = aplicar_promociones(conn, cliente_id, items)
+
     total = sum(it[3] for it in items)
     if metodo_pago in ("Tarjeta", "Transferencia", "Mercado Pago"):
         tipo_comprobante = "Factura C"
@@ -914,8 +1263,9 @@ def registrar_venta(conn, cliente_id, metodo_pago, items, tipo_comprobante_solic
 
     cur = conn.cursor()
     cur.execute(
-        "INSERT INTO ventas (fecha, cliente_id, total, metodo_pago, tipo_comprobante, numero_comprobante) VALUES (?, ?, ?, ?, ?, ?)",
-        (datetime.now().strftime("%Y-%m-%d"), cliente_id, total, metodo_pago, tipo_comprobante, numero_comprobante),
+        """INSERT INTO ventas (fecha, cliente_id, total, metodo_pago, tipo_comprobante, numero_comprobante, id_operacion)
+           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (datetime.now().strftime("%Y-%m-%d"), cliente_id, total, metodo_pago, tipo_comprobante, numero_comprobante, id_operacion),
     )
     venta_id = cur.lastrowid
     for producto_id, cant, precio_unitario, subtotal in items:
@@ -935,6 +1285,7 @@ def ventas_nueva():
         cliente_id = request.form.get("cliente_id") or None
         metodo_pago = request.form.get("metodo_pago", "Efectivo")
         tipo_comprobante_solicitado = request.form.get("tipo_comprobante", "Remito")
+        id_operacion = request.form.get("id_operacion", "").strip() or None
 
         producto_ids = request.form.getlist("producto_id")
         cantidades = request.form.getlist("cantidad")
@@ -957,7 +1308,9 @@ def ventas_nueva():
             conn.close()
             return redirect(url_for("ventas_nueva"))
 
-        venta_id, tipo_comprobante = registrar_venta(conn, cliente_id, metodo_pago, items, tipo_comprobante_solicitado)
+        venta_id, tipo_comprobante = registrar_venta(
+            conn, cliente_id, metodo_pago, items, tipo_comprobante_solicitado, id_operacion=id_operacion
+        )
         conn.close()
 
         if tipo_comprobante == "Factura C":
@@ -1428,6 +1781,83 @@ def pedidos_desmarcar(producto_id):
     conn.close()
     flash("Desmarcado: si sigue bajo el mínimo, vuelve a aparecer en la lista de faltantes.", "info")
     return redirect(url_for("pedidos_lista"))
+
+
+# ---------------------------------------------------------------------------
+# Compras/ventas sin factura (no pasan por compras/ventas ni por AFIP, pero
+# sí impactan el mismo stock_actual que todo lo demás).
+# ---------------------------------------------------------------------------
+@app.route("/stock/no-facturado", methods=["GET", "POST"])
+def stock_no_facturado():
+    conn = db.get_connection()
+    if request.method == "POST":
+        tipo = request.form.get("tipo", "compra")
+        if tipo not in ("compra", "venta"):
+            tipo = "compra"
+        producto_id = request.form.get("producto_id")
+        try:
+            cantidad = int(request.form.get("cantidad") or 0)
+        except ValueError:
+            cantidad = 0
+        try:
+            precio = float(request.form.get("precio") or 0)
+        except ValueError:
+            precio = 0
+        contraparte = request.form.get("contraparte", "").strip() or None
+        observaciones = request.form.get("observaciones", "").strip() or None
+
+        producto = conn.execute("SELECT * FROM productos WHERE id=?", (producto_id,)).fetchone() if producto_id else None
+        if not producto or cantidad <= 0:
+            flash("Elegí un producto válido (de la lista) y una cantidad mayor a cero.", "danger")
+            conn.close()
+            return redirect(url_for("stock_no_facturado"))
+
+        if tipo == "venta" and cantidad > producto["stock_actual"]:
+            flash(f"No hay stock suficiente de {producto['nombre']} (stock actual: {producto['stock_actual']}).", "danger")
+            conn.close()
+            return redirect(url_for("stock_no_facturado"))
+
+        conn.execute(
+            """INSERT INTO movimientos_no_facturados (tipo, producto_id, cantidad, precio, contraparte, observaciones)
+               VALUES (?, ?, ?, ?, ?, ?)""",
+            (tipo, producto["id"], cantidad, precio, contraparte, observaciones),
+        )
+        delta = cantidad if tipo == "compra" else -cantidad
+        conn.execute("UPDATE productos SET stock_actual = stock_actual + ? WHERE id=?", (delta, producto["id"]))
+        conn.commit()
+        conn.close()
+        flash("Movimiento registrado y stock actualizado.", "success")
+        return redirect(url_for("stock_no_facturado"))
+
+    movimientos = conn.execute(
+        """SELECT m.*, p.nombre AS producto_nombre, p.codigo AS producto_codigo FROM movimientos_no_facturados m
+           JOIN productos p ON p.id = m.producto_id ORDER BY m.fecha DESC, m.id DESC"""
+    ).fetchall()
+    productos = conn.execute("SELECT * FROM productos ORDER BY nombre").fetchall()
+    conn.close()
+    return render_template(
+        "stock_no_facturado.html", movimientos=movimientos, productos_json=productos_para_buscador(productos),
+    )
+
+
+@app.route("/stock/no-facturado/<int:movimiento_id>/conciliar", methods=["POST"])
+def stock_no_facturado_conciliar(movimiento_id):
+    conn = db.get_connection()
+    conn.execute("UPDATE movimientos_no_facturados SET conciliado=1 WHERE id=?", (movimiento_id,))
+    conn.commit()
+    conn.close()
+    flash("Movimiento marcado como conciliado.", "success")
+    return redirect(url_for("stock_no_facturado"))
+
+
+@app.route("/stock/no-facturado/<int:movimiento_id>/desconciliar", methods=["POST"])
+def stock_no_facturado_desconciliar(movimiento_id):
+    conn = db.get_connection()
+    conn.execute("UPDATE movimientos_no_facturados SET conciliado=0 WHERE id=?", (movimiento_id,))
+    conn.commit()
+    conn.close()
+    flash("Movimiento desmarcado.", "info")
+    return redirect(url_for("stock_no_facturado"))
 
 
 # ---------------------------------------------------------------------------
