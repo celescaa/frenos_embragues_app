@@ -34,7 +34,7 @@
           <option>Remito</option>
           <option>Recibo</option>
         </select>
-        <div id="facturaCHint" class="form-text text-warning d-none">
+        <div id="facturaABHint" class="form-text text-warning d-none">
           <i class="bi bi-receipt-cutoff"></i> Con este medio de pago se genera automáticamente una <strong>Factura A o B</strong> por ARCA, según la condición frente al IVA del cliente.
         </div>
       </div>
@@ -218,12 +218,12 @@ agregarFila();
 // ---------------------------------------------------------------------------
 const metodoPagoSelect = document.getElementById('metodoPagoSelect');
 const tipoComprobanteSelect = document.getElementById('tipoComprobanteSelect');
-const facturaCHint = document.getElementById('facturaCHint');
+const facturaABHint = document.getElementById('facturaABHint');
 
 function actualizarTipoComprobante() {
-  const esFacturaC = metodoPagoSelect.value === 'Tarjeta' || metodoPagoSelect.value === 'Transferencia';
-  tipoComprobanteSelect.disabled = esFacturaC;
-  facturaCHint.classList.toggle('d-none', !esFacturaC);
+  const esFacturaAB = metodoPagoSelect.value === 'Tarjeta' || metodoPagoSelect.value === 'Transferencia';
+  tipoComprobanteSelect.disabled = esFacturaAB;
+  facturaABHint.classList.toggle('d-none', !esFacturaAB);
 }
 metodoPagoSelect.addEventListener('change', actualizarTipoComprobante);
 actualizarTipoComprobante();

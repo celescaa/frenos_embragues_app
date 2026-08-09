@@ -175,7 +175,7 @@ CREATE TABLE IF NOT EXISTS usuarios (
 -- para un tercero). Un cargo puede tener varios productos (ver
 -- cuenta_corriente_movimiento_items, análoga a venta_items) y, cuando el
 -- comprador real es un tercero identificado con su propio CUIT/DNI
--- (tercero_cuit_dni), la Factura C se emite a nombre de ese tercero en vez
+-- (tercero_cuit_dni), la Factura A o B se emite a nombre de ese tercero en vez
 -- del cliente/mecánico dueño de la cuenta — cliente_tercero_nombre queda
 -- como el nombre de referencia en los dos casos (facturado o no).
 -- producto_id quedó de una versión anterior (un cargo = un solo producto),
