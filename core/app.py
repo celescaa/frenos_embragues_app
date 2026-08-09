@@ -462,10 +462,14 @@ def clientes_editar(cliente_id):
 @app.route("/clientes/<int:cliente_id>/eliminar", methods=["POST"])
 def clientes_eliminar(cliente_id):
     conn = db.get_connection()
-    conn.execute("DELETE FROM clientes WHERE id=?", (cliente_id,))
-    conn.commit()
+    try:
+        conn.execute("DELETE FROM clientes WHERE id=?", (cliente_id,))
+        conn.commit()
+        flash("Cliente eliminado.", "info")
+    except sqlite3.IntegrityError:
+        conn.rollback()
+        flash("No se puede eliminar: este cliente tiene ventas o movimientos de cuenta corriente cargados.", "danger")
     conn.close()
-    flash("Cliente eliminado.", "info")
     return redirect(url_for("clientes_lista"))
 
 
