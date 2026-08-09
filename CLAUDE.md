@@ -531,26 +531,49 @@ Agregado después:
     sin tocar el modelo de ventas — se completa a mano en un campo nuevo
     de `venta_form.html`, con la explicación de uso ahí mismo.
   - **Cuenta corriente de clientes** (columna `clientes.tipo_cliente`
-    `particular`/`mecanico`; tabla nueva `cuenta_corriente_movimientos`;
+    `particular`/`mecanico`; tabla `cuenta_corriente_movimientos`;
     pantalla `/clientes/<id>/cuenta-corriente`, accesible desde un ícono en
     `/clientes` solo para clientes tipo "mecánico"): registra cargos y
-    pagos con saldo acumulado. `cliente_tercero_nombre` es texto libre de
-    referencia (para qué auto/cliente final fue el repuesto), no crea una
-    ficha de cliente aparte. Cada cargo dispara una Factura C a nombre del
-    cliente mecánico (nunca del tercero), reutilizando ARCA: se separó
-    `facturacion_afip.emitir_factura_c()` en una llamada cruda a ARCA
-    (`_emitir_factura_c_arca()`, sin tocar ninguna tabla) más el guardado
-    específico de cada caso — `emitir_factura_c()` sigue escribiendo en
-    `ventas` exactamente como antes, y la nueva `emitir_factura_c_movimiento()`
-    escribe en `cuenta_corriente_movimientos` (mismas columnas
-    `cae`/`cae_vencimiento`/`facturacion_estado`/`facturacion_error` que ya
-    tenía `ventas`). Mismo criterio defensivo de siempre: nunca bloquea el
-    movimiento si ARCA falla, con botón de reintento igual al que ya tenía
-    el comprobante de una venta. Si el monto de un cargo supera
-    `facturacion_afip.UMBRAL_IDENTIFICACION_RECEPTOR` (constante con nota
-    de que ARCA la cambia por resolución y hay que revisarla contra la
-    normativa vigente) y el cliente no tiene CUIT/DNI cargado, el sistema
-    no deja registrar el cargo hasta que se cargue.
+    pagos con saldo acumulado. Cada cargo dispara una Factura C, reutilizando
+    ARCA: se separó `facturacion_afip.emitir_factura_c()` en una llamada
+    cruda a ARCA (`_emitir_factura_c_arca()`, sin tocar ninguna tabla) más
+    el guardado específico de cada caso — `emitir_factura_c()` sigue
+    escribiendo en `ventas` exactamente como antes, y la nueva
+    `emitir_factura_c_movimiento()` escribe en `cuenta_corriente_movimientos`
+    (mismas columnas `cae`/`cae_vencimiento`/`facturacion_estado`/
+    `facturacion_error` que ya tenía `ventas`). Mismo criterio defensivo de
+    siempre: nunca bloquea el movimiento si ARCA falla, con botón de
+    reintento igual al que ya tenía el comprobante de una venta. Si el
+    monto de un cargo supera `facturacion_afip.UMBRAL_IDENTIFICACION_RECEPTOR`
+    (constante con nota de que ARCA la cambia por resolución y hay que
+    revisarla contra la normativa vigente) y no hay ningún CUIT/DNI para
+    identificar al receptor, el sistema no deja registrar el cargo hasta
+    que se cargue uno.
+    - **Rediseño a pedido de Celes tras la primera versión (09/08/2026)**:
+      la primera versión tenía tres problemas de uso real. (1) Un cargo
+      solo podía tener un producto y no descontaba stock — pero si el
+      mecánico se lleva el repuesto, el producto ya salió del local aunque
+      todavía no se haya cobrado. Ahora un cargo es una lista de productos
+      (tabla nueva `cuenta_corriente_movimiento_items`, mismo patrón que
+      `venta_items`, con el mismo buscador tipo autocompletar que Nueva
+      venta/Nueva compra) y **descuenta stock al confirmarse**, igual
+      criterio que una venta al contado (el stock baja cuando el producto
+      sale, no cuando se termina de cobrar). (2) La Factura C se emitía
+      siempre a nombre del cliente/mecánico dueño de la cuenta — pero en la
+      práctica el mecánico a veces compra en nombre de un tercero con su
+      propio CUIT/DNI (ej. "José compra a nombre de Marta", la factura
+      corresponde a Marta). Columna nueva `tercero_cuit_dni`: si se carga,
+      `emitir_factura_c_movimiento()` factura a ese CUIT/DNI en vez del
+      del cliente/mecánico; `cliente_tercero_nombre` (ya existía) sigue de
+      referencia visual en los dos casos. **Nota de cumplimiento avisada
+      igual que la de tarjeta/efectivo**: como el negocio es monotributista,
+      solo puede emitir Factura C — nunca Factura A, aunque el tercero
+      facturado sea Responsable Inscripto con CUIT propio. No se implementó
+      ningún tipo de comprobante distinto de Factura C por esto. (3) No
+      había forma de ver rápido quién debía más — pantalla nueva
+      `/clientes/top-deudores` (link desde `/clientes` y desde cada cuenta
+      corriente), top 5 por saldo pendiente (`SUM(cargos) - SUM(pagos)`)
+      entre los clientes con movimientos cargados.
   - **Ranking de clientes + descuentos aprobados** (`/clientes/top`, link
     nuevo desde `/clientes`): mismo cálculo de top 5 que ya tenía el panel
     de analítica, pero con período elegible (30/90/365 días o histórico) y

@@ -479,11 +479,21 @@ def cuenta_corriente_ver(cliente_id):
         flash("No encontré ese cliente.", "danger")
         return redirect(url_for("clientes_lista"))
     movimientos = conn.execute(
-        """SELECT m.*, p.nombre AS producto_nombre FROM cuenta_corriente_movimientos m
-           LEFT JOIN productos p ON p.id = m.producto_id
-           WHERE m.cliente_id=? ORDER BY m.fecha DESC, m.id DESC""",
+        """SELECT * FROM cuenta_corriente_movimientos
+           WHERE cliente_id=? ORDER BY fecha DESC, id DESC""",
         (cliente_id,),
     ).fetchall()
+    movimientos = [dict(m) for m in movimientos]
+    for m in movimientos:
+        # ojo: no llamarla "items" — Jinja resuelve m.items contra el
+        # método dict.items() antes que la clave, y el template quedaría
+        # iterando sobre el método en vez de esta lista.
+        m["renglones"] = conn.execute(
+            """SELECT i.*, p.nombre AS producto_nombre, p.codigo AS producto_codigo
+               FROM cuenta_corriente_movimiento_items i JOIN productos p ON p.id = i.producto_id
+               WHERE i.movimiento_id=?""",
+            (m["id"],),
+        ).fetchall()
     saldo = sum(m["monto"] if m["tipo"] == "cargo" else -m["monto"] for m in movimientos)
     productos = conn.execute("SELECT * FROM productos ORDER BY nombre").fetchall()
     conn.close()
@@ -496,6 +506,16 @@ def cuenta_corriente_ver(cliente_id):
 
 @app.route("/clientes/<int:cliente_id>/cuenta-corriente/nueva", methods=["POST"])
 def cuenta_corriente_nueva(cliente_id):
+    """Registra un movimiento de cuenta corriente.
+
+    - `pago`: cancela deuda, monto libre, no toca stock ni factura.
+    - `cargo`: el mecánico se lleva uno o más productos a crédito — mismo
+      criterio que una venta (el stock se descuenta al confirmarse, no
+      cuando se termina de pagar) pero sin cobrar en el momento. Puede
+      facturarse a nombre del mecánico (default) o de un tercero
+      identificado con su propio CUIT/DNI (`tercero_cuit_dni`) — por
+      ejemplo cuando el mecánico compra en nombre de un cliente suyo.
+    """
     conn = db.get_connection()
     cliente = conn.execute("SELECT * FROM clientes WHERE id=?", (cliente_id,)).fetchone()
     if not cliente:
@@ -506,49 +526,93 @@ def cuenta_corriente_nueva(cliente_id):
     tipo = request.form.get("tipo", "cargo")
     if tipo not in ("cargo", "pago"):
         tipo = "cargo"
-    try:
-        monto = float(request.form.get("monto") or 0)
-    except ValueError:
-        monto = 0
-    if monto <= 0:
-        flash("El monto tiene que ser mayor a cero.", "danger")
+    cliente_tercero_nombre = request.form.get("cliente_tercero_nombre", "").strip() or None
+    observaciones = request.form.get("observaciones", "").strip() or None
+
+    if tipo == "pago":
+        try:
+            monto = float(request.form.get("monto") or 0)
+        except ValueError:
+            monto = 0
+        if monto <= 0:
+            flash("El monto tiene que ser mayor a cero.", "danger")
+            conn.close()
+            return redirect(url_for("cuenta_corriente_ver", cliente_id=cliente_id))
+
+        conn.execute(
+            """INSERT INTO cuenta_corriente_movimientos
+               (cliente_id, cliente_tercero_nombre, monto, tipo, observaciones)
+               VALUES (?, ?, ?, 'pago', ?)""",
+            (cliente_id, cliente_tercero_nombre, monto, observaciones),
+        )
+        conn.commit()
+        conn.close()
+        flash("Pago registrado en la cuenta corriente.", "success")
+        return redirect(url_for("cuenta_corriente_ver", cliente_id=cliente_id))
+
+    # tipo == "cargo": uno o más productos, como una mini venta a crédito.
+    tercero_cuit_dni = request.form.get("tercero_cuit_dni", "").strip() or None
+    producto_ids = request.form.getlist("producto_id")
+    cantidades = request.form.getlist("cantidad")
+
+    items = []
+    for pid, cant in zip(producto_ids, cantidades):
+        if not pid or not cant:
+            continue
+        try:
+            cant = int(cant)
+        except ValueError:
+            continue
+        if cant <= 0:
+            continue
+        producto = conn.execute("SELECT * FROM productos WHERE id=?", (pid,)).fetchone()
+        if not producto:
+            continue
+        subtotal = cant * producto["precio_venta"]
+        items.append((producto["id"], cant, producto["precio_venta"], subtotal))
+
+    if not items:
+        flash("Agregá al menos un producto al cargo.", "danger")
         conn.close()
         return redirect(url_for("cuenta_corriente_ver", cliente_id=cliente_id))
 
-    if (
-        tipo == "cargo"
-        and monto > facturacion_afip.UMBRAL_IDENTIFICACION_RECEPTOR
-        and not (cliente["cuit_dni"] or "").strip()
-    ):
+    monto = sum(it[3] for it in items)
+    receptor_cuit_dni = tercero_cuit_dni or (cliente["cuit_dni"] or "")
+    if monto > facturacion_afip.UMBRAL_IDENTIFICACION_RECEPTOR and not receptor_cuit_dni.strip():
+        a_quien = cliente_tercero_nombre or cliente["nombre"]
         flash(
             f"Este cargo supera el monto a partir del cual ARCA exige identificar al receptor. "
-            f"Cargá el CUIT/DNI de {cliente['nombre']} en su ficha antes de continuar.",
+            f"Cargá el CUIT/DNI de {a_quien} (ficha del cliente, o el campo de CUIT/DNI del tercero) antes de continuar.",
             "danger",
         )
         conn.close()
         return redirect(url_for("cuenta_corriente_ver", cliente_id=cliente_id))
 
-    producto_id = request.form.get("producto_id") or None
-    cliente_tercero_nombre = request.form.get("cliente_tercero_nombre", "").strip() or None
-    observaciones = request.form.get("observaciones", "").strip() or None
-
     cur = conn.execute(
         """INSERT INTO cuenta_corriente_movimientos
-           (cliente_id, cliente_tercero_nombre, producto_id, monto, tipo, observaciones)
-           VALUES (?, ?, ?, ?, ?, ?)""",
-        (cliente_id, cliente_tercero_nombre, producto_id, monto, tipo, observaciones),
+           (cliente_id, cliente_tercero_nombre, tercero_cuit_dni, monto, tipo, observaciones)
+           VALUES (?, ?, ?, ?, 'cargo', ?)""",
+        (cliente_id, cliente_tercero_nombre, tercero_cuit_dni, monto, observaciones),
     )
     movimiento_id = cur.lastrowid
+    for producto_id, cant, precio_unitario, subtotal in items:
+        conn.execute(
+            """INSERT INTO cuenta_corriente_movimiento_items
+               (movimiento_id, producto_id, cantidad, precio_unitario, subtotal) VALUES (?, ?, ?, ?, ?)""",
+            (movimiento_id, producto_id, cant, precio_unitario, subtotal),
+        )
+        # el producto se lo lleva ahora mismo, solo falta que se pague —
+        # mismo criterio que una venta al contado.
+        conn.execute("UPDATE productos SET stock_actual = stock_actual - ? WHERE id=?", (cant, producto_id))
     conn.commit()
     conn.close()
 
-    if tipo == "cargo":
-        # Nunca bloquea ni revierte el movimiento si ARCA falla: se puede
-        # reintentar después desde esta misma pantalla (igual criterio que
-        # con la Factura C de una venta del local).
-        facturacion_afip.emitir_factura_c_movimiento(movimiento_id)
+    # Nunca bloquea ni revierte el movimiento si ARCA falla: se puede
+    # reintentar después desde esta misma pantalla (igual criterio que con
+    # la Factura C de una venta del local).
+    facturacion_afip.emitir_factura_c_movimiento(movimiento_id)
 
-    flash("Movimiento registrado en la cuenta corriente.", "success")
+    flash("Cargo registrado en la cuenta corriente y stock descontado.", "success")
     return redirect(url_for("cuenta_corriente_ver", cliente_id=cliente_id))
 
 
@@ -571,6 +635,25 @@ def cuenta_corriente_facturar(cliente_id, movimiento_id):
     else:
         flash("No se pudo emitir la Factura C: %s" % (estado["facturacion_error"] or "error desconocido"), "danger")
     return redirect(url_for("cuenta_corriente_ver", cliente_id=cliente_id))
+
+
+@app.route("/clientes/top-deudores")
+def clientes_top_deudores():
+    """Ranking de los clientes con mayor saldo pendiente en su cuenta
+    corriente (cargos menos pagos), para priorizar a quién reclamarle."""
+    conn = db.get_connection()
+    deudores = conn.execute(
+        """SELECT c.id, c.nombre, c.telefono,
+                  COALESCE(SUM(CASE WHEN m.tipo='cargo' THEN m.monto ELSE 0 END), 0)
+                  - COALESCE(SUM(CASE WHEN m.tipo='pago' THEN m.monto ELSE 0 END), 0) AS saldo
+           FROM clientes c JOIN cuenta_corriente_movimientos m ON m.cliente_id = c.id
+           GROUP BY c.id
+           HAVING saldo > 0
+           ORDER BY saldo DESC
+           LIMIT 5"""
+    ).fetchall()
+    conn.close()
+    return render_template("clientes_top_deudores.html", deudores=deudores)
 
 
 # ---------------------------------------------------------------------------

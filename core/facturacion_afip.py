@@ -237,8 +237,11 @@ def emitir_factura_c(venta_id):
 def emitir_factura_c_movimiento(movimiento_id):
     """Igual que emitir_factura_c(), pero para un cargo de cuenta corriente
     (core/app.py, /clientes/<id>/cuenta-corriente). El receptor de la
-    factura es siempre el cliente mecánico de la cuenta corriente (a quien
-    se le cobra), nunca el tercero que figura solo como referencia."""
+    factura es el cliente/mecánico dueño de la cuenta corriente por
+    defecto, salvo que el cargo tenga cargado `tercero_cuit_dni` (el
+    comprador real es un tercero identificado, no el mecánico) — en ese
+    caso se factura a nombre de ese tercero. Sigue siendo siempre Factura C
+    (nunca A/B): este negocio es monotributista, no puede emitir otra cosa."""
     conn = db.get_connection()
     try:
         mov = conn.execute(
@@ -249,7 +252,8 @@ def emitir_factura_c_movimiento(movimiento_id):
         if not mov:
             return
 
-        resultado = _emitir_factura_c_arca(mov["cliente_cuit_dni"], mov["monto"], mov["fecha"][:10])
+        receptor_cuit_dni = mov["tercero_cuit_dni"] or mov["cliente_cuit_dni"]
+        resultado = _emitir_factura_c_arca(receptor_cuit_dni, mov["monto"], mov["fecha"][:10])
 
         if resultado["estado"] == "emitida":
             conn.execute(

@@ -21,13 +21,15 @@
     </select>
   </div>
   <div class="col-md-4">
-    <input type="text" name="q" value="{{ q }}" class="form-control" placeholder="Buscar por código, nombre, marca o modelo de auto (ej: Gol)...">
+    <input type="text" name="q" id="qFiltro" value="{{ q }}" class="form-control" autocomplete="off"
+           placeholder="Buscar por código, nombre, marca o modelo de auto (ej: Gol)...">
   </div>
   <div class="col-12">
     <button type="submit" class="btn btn-outline-primary btn-sm"><i class="bi bi-funnel"></i> Filtrar</button>
     {% if q or categoria or subcategoria %}
       <a href="{{ url_for('productos_lista') }}" class="btn btn-link btn-sm">Limpiar filtros</a>
     {% endif %}
+    <span id="qContador" class="text-muted small ms-2"></span>
   </div>
 </form>
 
@@ -36,9 +38,10 @@
     <thead>
       <tr><th></th><th>Código</th><th>Nombre</th><th>Categoría</th><th>Marca</th><th>Compatible con</th><th class="text-end">Costo</th><th class="text-end">Precio</th><th class="text-end">Stock</th><th>Mejor precio</th><th></th></tr>
     </thead>
-    <tbody>
+    <tbody id="productosBody">
     {% for p in productos %}
-      <tr class="{{ 'low-stock' if p.stock_actual <= p.stock_minimo else '' }}">
+      <tr class="fila-producto {{ 'low-stock' if p.stock_actual <= p.stock_minimo else '' }}"
+          data-search="{{ (p.nombre ~ ' ' ~ (p.codigo or '') ~ ' ' ~ (p.marca or '') ~ ' ' ~ (p.modelo_compatible or '') ~ ' ' ~ (p.codigo_barras or ''))|lower }}">
         <td>
           {% if p.imagen %}
             <img src="{{ url_for('static', filename='img/productos/' + p.imagen) }}" alt="" style="width:40px;height:40px;object-fit:cover;border-radius:6px;">
@@ -73,6 +76,7 @@
     {% else %}
       <tr><td colspan="11" class="text-center text-muted py-4">No hay productos cargados todavía.</td></tr>
     {% endfor %}
+    <tr id="filaSinCoincidencias" style="display:none;"><td colspan="11" class="text-center text-muted py-4">Ningún producto coincide con "<span id="qSinCoincidenciasTexto"></span>".</td></tr>
     </tbody>
   </table>
 </div>
@@ -100,5 +104,34 @@ document.getElementById('categoriaFiltro').addEventListener('change', function()
   actualizarSubcategoriasFiltro(false);
 });
 actualizarSubcategoriasFiltro(true);
+
+// ---------------------------------------------------------------------------
+// Coincidencias en vivo: a medida que se escribe en el buscador, se filtran
+// las filas ya renderizadas (sin esperar a apretar "Filtrar" ni recargar la
+// página). Categoría/subcategoría siguen siendo filtros de servidor, porque
+// cambian qué productos se traen; el texto libre se resuelve acá mismo.
+// ---------------------------------------------------------------------------
+const qFiltro = document.getElementById('qFiltro');
+const filas = Array.from(document.querySelectorAll('#productosBody tr.fila-producto'));
+const filaSinCoincidencias = document.getElementById('filaSinCoincidencias');
+const qContador = document.getElementById('qContador');
+
+function aplicarFiltroTexto() {
+  const q = qFiltro.value.trim().toLowerCase();
+  let visibles = 0;
+  filas.forEach(function(fila) {
+    const coincide = !q || fila.dataset.search.includes(q);
+    fila.style.display = coincide ? '' : 'none';
+    if (coincide) visibles++;
+  });
+  if (filas.length > 0) {
+    filaSinCoincidencias.style.display = visibles === 0 ? '' : 'none';
+    document.getElementById('qSinCoincidenciasTexto').textContent = q;
+  }
+  qContador.textContent = q ? (visibles + ' de ' + filas.length + ' producto(s)') : '';
+}
+
+qFiltro.addEventListener('input', aplicarFiltroTexto);
+aplicarFiltroTexto();
 </script>
 {% endblock %}
