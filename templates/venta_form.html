@@ -35,7 +35,7 @@
           <option>Recibo</option>
         </select>
         <div id="facturaCHint" class="form-text text-warning d-none">
-          <i class="bi bi-receipt-cutoff"></i> Con este medio de pago se genera automáticamente una <strong>Factura C</strong> por ARCA.
+          <i class="bi bi-receipt-cutoff"></i> Con este medio de pago se genera automáticamente una <strong>Factura A o B</strong> por ARCA, según la condición frente al IVA del cliente.
         </div>
       </div>
     </div>
@@ -214,7 +214,7 @@ agregarFila();
 
 // ---------------------------------------------------------------------------
 // Regla del negocio: efectivo -> remito/recibo interno (se elige acá);
-// tarjeta o transferencia -> Factura C automática por ARCA (no se elige).
+// tarjeta o transferencia -> Factura A o B automática por ARCA (no se elige).
 // ---------------------------------------------------------------------------
 const metodoPagoSelect = document.getElementById('metodoPagoSelect');
 const tipoComprobanteSelect = document.getElementById('tipoComprobanteSelect');

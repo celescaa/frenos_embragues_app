@@ -54,15 +54,24 @@
       </table>
 
       <div class="row border-top pt-3 mt-2">
-        <div class="col-md-8 mb-3">
+        <div class="col-md-6 mb-3">
           <label class="form-label">¿A nombre de quién es? (opcional)</label>
           <input type="text" name="cliente_tercero_nombre" class="form-control" placeholder="Ej: para Marta, dueña del Renault Clio">
-          <div class="form-text">Solo referencia si se deja en blanco el CUIT/DNI de abajo. Si el mecánico compra en nombre de otra persona y esa persona tiene CUIT/DNI propio, cargalo para que la Factura C salga a su nombre.</div>
+          <div class="form-text">Solo referencia si se deja en blanco el CUIT/DNI de abajo. Si el mecánico compra en nombre de otra persona y esa persona tiene CUIT/DNI propio, cargalo para que la factura salga a su nombre.</div>
         </div>
-        <div class="col-md-4 mb-3">
+        <div class="col-md-3 mb-3">
           <label class="form-label">CUIT/DNI del tercero (opcional)</label>
           <input type="text" name="tercero_cuit_dni" class="form-control">
           <div class="form-text">Si se completa, la factura va a nombre de este CUIT/DNI en vez del de {{ cliente.nombre }}.</div>
+        </div>
+        <div class="col-md-3 mb-3">
+          <label class="form-label">Condición IVA del tercero</label>
+          <select name="tercero_condicion_iva" class="form-select">
+            {% for valor, etiqueta in condiciones_iva %}
+              <option value="{{ valor }}" {{ 'selected' if valor == 'consumidor_final' else '' }}>{{ etiqueta }}</option>
+            {% endfor %}
+          </select>
+          <div class="form-text">Solo importa si cargaste el CUIT/DNI de arriba.</div>
         </div>
       </div>
       {% if not cliente.cuit_dni %}
@@ -102,7 +111,7 @@
   <h6 class="mb-3">Historial</h6>
   <table class="table table-hover align-middle mb-0">
     <thead>
-      <tr><th>Fecha</th><th>Tipo</th><th>Productos</th><th>A nombre de</th><th class="text-end">Monto</th><th>Factura C</th><th></th></tr>
+      <tr><th>Fecha</th><th>Tipo</th><th>Productos</th><th>A nombre de</th><th class="text-end">Monto</th><th>Factura</th><th></th></tr>
     </thead>
     <tbody>
     {% for m in movimientos %}
@@ -133,7 +142,7 @@
         <td>
           {% if m.tipo == 'cargo' %}
             {% if m.facturacion_estado == 'emitida' %}
-              <span class="badge bg-success">CAE {{ m.cae }}</span>
+              <span class="badge bg-success">{{ m.tipo_comprobante }} · CAE {{ m.cae }}</span>
             {% elif m.facturacion_estado == 'sin_configurar' %}
               <span class="badge bg-warning text-dark">Sin configurar</span>
             {% elif m.facturacion_estado == 'error' %}

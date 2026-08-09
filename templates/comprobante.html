@@ -19,19 +19,20 @@
   </div>
 </div>
 
-{% if venta.tipo_comprobante == "Factura C" and venta.cae %}
+{% set es_factura = venta.tipo_comprobante in ("Factura A", "Factura B") %}
+{% if es_factura and venta.cae %}
   <div class="alert alert-success no-print">
-    <i class="bi bi-patch-check"></i> <strong>Factura C electrónica autorizada por ARCA.</strong>
+    <i class="bi bi-patch-check"></i> <strong>{{ venta.tipo_comprobante }} electrónica autorizada por ARCA.</strong>
     CAE {{ venta.cae }} · vence {{ venta.cae_vencimiento }}.
   </div>
-{% elif venta.tipo_comprobante == "Factura C" %}
+{% elif es_factura %}
   <div class="alert alert-warning no-print d-flex justify-content-between align-items-center flex-wrap gap-2">
     <div>
       <i class="bi bi-exclamation-triangle"></i>
       {% if venta.facturacion_estado == "sin_configurar" %}
-        Esta venta debería generar una <strong>Factura C</strong> por ARCA, pero todavía no está configurado el acceso a Afip SDK.
+        Esta venta debería generar una <strong>{{ venta.tipo_comprobante }}</strong> por ARCA, pero todavía no está configurado el acceso a Afip SDK.
       {% else %}
-        Esta venta debería generar una <strong>Factura C</strong> por ARCA, pero no se pudo emitir todavía{% if venta.facturacion_error %}: <span class="text-muted">{{ venta.facturacion_error }}</span>{% endif %}.
+        Esta venta debería generar una <strong>{{ venta.tipo_comprobante }}</strong> por ARCA, pero no se pudo emitir todavía{% if venta.facturacion_error %}: <span class="text-muted">{{ venta.facturacion_error }}</span>{% endif %}.
       {% endif %}
     </div>
     <form method="post" action="{{ url_for('ventas_facturar', venta_id=venta.id) }}" class="m-0">
@@ -89,11 +90,15 @@
     {% endfor %}
     </tbody>
     <tfoot>
+      {% if es_factura and venta.imp_neto is not none %}
+        <tr><th colspan="4" class="text-end fw-normal text-muted">Neto</th><td class="text-end text-muted">{{ venta.imp_neto|money }}</td></tr>
+        <tr><th colspan="4" class="text-end fw-normal text-muted">IVA (21%)</th><td class="text-end text-muted">{{ venta.imp_iva|money }}</td></tr>
+      {% endif %}
       <tr><th colspan="4" class="text-end">Total</th><th class="text-end">{{ venta.total|money }}</th></tr>
     </tfoot>
   </table>
 
-  {% if venta.tipo_comprobante == "Factura C" and venta.cae %}
+  {% if es_factura and venta.cae %}
   <div class="row mt-3 align-items-center">
     <div class="col-md-8">
       <div class="small text-muted">CAE</div>

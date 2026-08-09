@@ -415,7 +415,15 @@ def _migrar(conn):
             ("subcategoria", "TEXT"),
         ],
         "proveedores": [("activo", "INTEGER NOT NULL DEFAULT 1")],
-        "clientes": [("tipo_cliente", "TEXT NOT NULL DEFAULT 'particular'")],
+        "clientes": [
+            ("tipo_cliente", "TEXT NOT NULL DEFAULT 'particular'"),
+            # condición frente al IVA del cliente (ver facturacion_afip.py,
+            # CONDICION_IVA_MAP) — determina si le corresponde Factura A
+            # (Responsable Inscripto con CUIT) o Factura B (cualquier otro
+            # caso). El negocio es Responsable Inscripto, no monotributista:
+            # ya no hay Factura C.
+            ("condicion_iva", "TEXT NOT NULL DEFAULT 'consumidor_final'"),
+        ],
         "ventas": [
             ("cae", "TEXT"),
             ("cae_vencimiento", "TEXT"),
@@ -427,11 +435,23 @@ def _migrar(conn):
             # (ej. mitad efectivo, mitad tarjeta) para no contarlas dos veces
             # en "cantidad de ventas" — ver /ventas/dia.
             ("id_operacion", "TEXT"),
+            # desglose de IVA de la Factura A/B emitida (total ya incluye el
+            # IVA, igual que precio_venta) — nulo mientras no haya CAE.
+            ("imp_neto", "REAL"),
+            ("imp_iva", "REAL"),
         ],
-        # CUIT/DNI del tercero real a nombre de quien se factura un cargo de
-        # cuenta corriente (si no se carga, se factura al cliente/mecánico
-        # dueño de la cuenta, comportamiento de siempre).
-        "cuenta_corriente_movimientos": [("tercero_cuit_dni", "TEXT")],
+        "cuenta_corriente_movimientos": [
+            # CUIT/DNI del tercero real a nombre de quien se factura un cargo
+            # (si no se carga, se factura al cliente/mecánico dueño de la
+            # cuenta, comportamiento de siempre).
+            ("tercero_cuit_dni", "TEXT"),
+            # condición frente al IVA del tercero (solo relevante si se cargó
+            # tercero_cuit_dni) — mismos valores que clientes.condicion_iva.
+            ("tercero_condicion_iva", "TEXT"),
+            ("imp_neto", "REAL"),
+            ("imp_iva", "REAL"),
+            ("tipo_comprobante", "TEXT"),
+        ],
     }
     for tabla, columnas in columnas_nuevas.items():
         existentes = {r["name"] for r in conn.execute(f"PRAGMA table_info({tabla})")}

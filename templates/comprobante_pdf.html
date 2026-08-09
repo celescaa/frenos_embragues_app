@@ -70,6 +70,16 @@
         <td class="text-end">{{ it.subtotal|money }}</td>
       </tr>
     {% endfor %}
+      {% if venta.tipo_comprobante in ("Factura A", "Factura B") and venta.imp_neto is not none %}
+      <tr>
+        <td colspan="4" class="text-end muted">Neto</td>
+        <td class="text-end muted">{{ venta.imp_neto|money }}</td>
+      </tr>
+      <tr>
+        <td colspan="4" class="text-end muted">IVA (21%)</td>
+        <td class="text-end muted">{{ venta.imp_iva|money }}</td>
+      </tr>
+      {% endif %}
       <tr class="total-row">
         <td colspan="4" class="text-end">Total</td>
         <td class="text-end">{{ venta.total|money }}</td>
@@ -77,8 +87,8 @@
     </tbody>
   </table>
 
-  {% if venta.tipo_comprobante == "Factura C" and venta.cae %}
-    <div class="aviso-ok">Factura C electr&oacute;nica autorizada por ARCA. CAE {{ venta.cae }} &middot; vence {{ venta.cae_vencimiento }}.</div>
+  {% if venta.tipo_comprobante in ("Factura A", "Factura B") and venta.cae %}
+    <div class="aviso-ok">{{ venta.tipo_comprobante }} electr&oacute;nica autorizada por ARCA. CAE {{ venta.cae }} &middot; vence {{ venta.cae_vencimiento }}.</div>
     <table class="cae-table">
       <tr>
         <td style="width: 70%;">
@@ -92,8 +102,8 @@
         {% endif %}
       </tr>
     </table>
-  {% elif venta.tipo_comprobante == "Factura C" %}
-    <div class="aviso">Esta venta deber&iacute;a tener una Factura C autorizada por ARCA, pero todav&iacute;a no se emiti&oacute;.</div>
+  {% elif venta.tipo_comprobante in ("Factura A", "Factura B") %}
+    <div class="aviso">Esta venta deber&iacute;a tener una {{ venta.tipo_comprobante }} autorizada por ARCA, pero todav&iacute;a no se emiti&oacute;.</div>
   {% else %}
     <div class="aviso">Este es un {{ venta.tipo_comprobante }} interno del negocio, no reemplaza una factura fiscal de AFIP.</div>
   {% endif %}
