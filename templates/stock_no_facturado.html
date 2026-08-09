@@ -138,7 +138,7 @@ buscarInput.addEventListener('input', function() {
   const q = buscarInput.value.trim().toLowerCase();
   if (!q) { ocultar(); return; }
   const filtrados = PRODUCTOS.filter(function(p) {
-    return (p.nombre + ' ' + p.codigo + ' ' + p.marca).toLowerCase().includes(q);
+    return (p.nombre + ' ' + p.codigo + ' ' + p.marca + ' ' + p.modelo_compatible).toLowerCase().includes(q);
   });
   mostrarResultados(filtrados);
 });

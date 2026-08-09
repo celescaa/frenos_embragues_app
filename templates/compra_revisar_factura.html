@@ -255,7 +255,7 @@ function inicializarBuscador(fila) {
     q = (q || '').trim().toLowerCase();
     if (!q) { ocultar(); return; }
     const filtrados = PRODUCTOS.filter(function(p) {
-      const texto = (p.nombre + ' ' + p.codigo + ' ' + p.marca).toLowerCase();
+      const texto = (p.nombre + ' ' + p.codigo + ' ' + p.marca + ' ' + p.modelo_compatible).toLowerCase();
       return texto.includes(q);
     });
     mostrarResultados(filtrados);

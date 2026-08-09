@@ -494,24 +494,37 @@ Agregado después:
   respetando los patrones ya existentes (migraciones idempotentes, alta
   rápida vía modal + `/api/...-nuevo`, módulos externos que nunca lanzan
   excepción):
-  - **Filtro Categoría→Subcategoría→Modelo de auto en `/productos`**:
-    filtros GET (`categoria`, `subcategoria`, `modelo`) combinables con el
-    buscador de texto ya existente. El desplegable de subcategoría se
-    repuebla en cascada con el mismo JSON
+  - **Filtro Categoría→Subcategoría + búsqueda general en `/productos`**:
+    dos `<select>` (`categoria`, `subcategoria` — GET, combinables entre
+    sí) arriba del buscador de texto libre que ya existía (`q`). El
+    desplegable de subcategoría se repuebla en cascada con el mismo JSON
     (`subcategorias_por_categoria_json()`) que ya usaban la ficha de
-    producto y el buscador de compras. El filtro de modelo es un
-    `<input>` con `<datalist>` (no un desplegable fijo) que busca
-    coincidencia parcial contra `productos.modelo_compatible` — así
-    "Gol" encuentra un producto cargado como "VW Gol / Voyage" sin exigir
-    el campo completo (mismo criterio de coincidencia parcial que ya usa
-    el filtro de auto/modelo del catálogo público de la tienda). Primer
-    intento de este filtro fue por marca en vez de modelo; se corrigió a
-    pedido de Celes porque lo que se necesita es encontrar todo lo
-    compatible con un auto puntual, no filtrar por fabricante del repuesto.
+    producto y el buscador de compras. **No hay un campo de marca/modelo
+    aparte** (se probaron las dos variantes en el camino — primero marca,
+    después un input de modelo dedicado — y las dos se sacaron): la
+    búsqueda de auto compatible se resuelve escribiendo en el mismo `q` de
+    siempre, que ahora también matchea contra `productos.modelo_compatible`
+    además de nombre/código/marca/código de barras — así "Gol" encuentra
+    "VW Gol / Voyage" sin exigir el campo completo. El JSON del buscador
+    tipo autocompletar (`productos_para_buscador()`, reusado en Nueva
+    venta/Nueva compra/revisión de factura/movimientos sin factura) también
+    suma `modelo_compatible` a lo que indexa, por la misma razón.
+  - **Columna "Mejor precio" en `/productos`**: informativa, sin selección
+    manual — para cada producto muestra el proveedor activo con el
+    `precio_costo` más bajo cargado en `producto_proveedor`, si hay
+    alguno. La consulta que ya usaba `/pedidos` para elegir el proveedor
+    más conveniente se extrajo a `db.obtener_cotizaciones_producto()` /
+    `db.obtener_mejor_precio_por_producto()` en `database.py`, para no
+    tener el mismo criterio de "mejor precio" duplicado en dos rutas — las
+    dos pantallas llaman a la misma función.
   - **Ventas del día por medio de pago** (`/ventas/dia`, link nuevo desde
     `/ventas`): resumen agrupado por `metodo_pago` con cantidad y total,
-    más el detalle de cada venta del día. Para pagos mixtos (parte
-    efectivo, parte tarjeta/transferencia) se suma la columna
+    más el detalle de cada venta del día. Filtrable por fecha puntual
+    (no solo "hoy") y por medio de pago (`?medio_pago=Tarjeta`, desplegable
+    con los medios ya usados) — al filtrar por medio de pago, el resumen y
+    el detalle quedan acotados a ese subconjunto, sin tocar el modelo de
+    ventas ni el flujo de carga, es puramente de lectura. Para pagos mixtos
+    (parte efectivo, parte tarjeta/transferencia) se suma la columna
     `ventas.id_operacion` (texto libre, opcional): se cargan dos ventas
     separadas con el mismo valor ahí y el conteo de "operaciones" las
     cuenta como una sola (`COUNT(DISTINCT COALESCE(id_operacion, 'v'||id))`)

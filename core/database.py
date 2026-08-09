@@ -353,6 +353,28 @@ def obtener_subcategorias(conn=None, categoria_id=None, solo_activas=True):
     return filas
 
 
+def obtener_cotizaciones_producto(conn, producto_id):
+    """Cotizaciones de proveedores activos para un producto, de menor a
+    mayor precio_costo. Es la fuente única del criterio de "mejor precio"
+    que usan tanto /pedidos (agrupa por el proveedor más conveniente) como
+    la columna "Mejor precio" de /productos — no duplicar esta consulta en
+    los dos lugares."""
+    return conn.execute(
+        """SELECT pp.precio_costo, pp.codigo_proveedor, pr.id AS proveedor_id, pr.nombre AS proveedor_nombre,
+                  pr.email AS proveedor_email, pr.telefono AS proveedor_telefono
+           FROM producto_proveedor pp JOIN proveedores pr ON pr.id = pp.proveedor_id
+           WHERE pp.producto_id = ? AND pr.activo = 1 ORDER BY pp.precio_costo ASC""",
+        (producto_id,),
+    ).fetchall()
+
+
+def obtener_mejor_precio_por_producto(conn, producto_id):
+    """La cotización más barata de un producto (ver obtener_cotizaciones_producto
+    de arriba), o None si no hay ninguna cargada."""
+    cotizaciones = obtener_cotizaciones_producto(conn, producto_id)
+    return cotizaciones[0] if cotizaciones else None
+
+
 def init_db():
     conn = get_connection()
     conn.executescript(SCHEMA)
