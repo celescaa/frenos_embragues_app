@@ -286,13 +286,17 @@ def eliminar_imagen_producto(nombre_archivo):
 
 
 def productos_para_buscador(productos):
-    """Lista liviana de productos en JSON para el buscador tipo autocompletar."""
+    """Lista liviana de productos en JSON para el buscador tipo autocompletar
+    (Nueva venta, Nueva compra, movimientos sin factura). Incluye
+    modelo_compatible para que buscar por auto (ej. "Gol") también matchee,
+    no solo nombre/código/marca."""
     return [
         {
             "id": p["id"],
             "nombre": p["nombre"],
             "codigo": p["codigo"] or "",
             "marca": p["marca"] or "",
+            "modelo_compatible": p["modelo_compatible"] or "",
             "precio_venta": p["precio_venta"],
             "precio_costo": p["precio_costo"],
             "stock_actual": p["stock_actual"],
@@ -720,25 +724,21 @@ def productos_lista():
     q = request.args.get("q", "").strip()
     categoria = request.args.get("categoria", "").strip()
     subcategoria = request.args.get("subcategoria", "").strip()
-    modelo = request.args.get("modelo", "").strip()
 
     condiciones = []
     parametros = []
     if q:
-        condiciones.append("(nombre LIKE ? OR codigo LIKE ? OR marca LIKE ? OR codigo_barras = ?)")
-        parametros += [f"%{q}%", f"%{q}%", f"%{q}%", q]
+        # el mismo buscador de texto libre de siempre, ahora también matchea
+        # por modelo de auto compatible (ej. "Gol") además de nombre/código/
+        # marca — no hace falta un campo de búsqueda aparte para eso.
+        condiciones.append("(nombre LIKE ? OR codigo LIKE ? OR marca LIKE ? OR modelo_compatible LIKE ? OR codigo_barras = ?)")
+        parametros += [f"%{q}%", f"%{q}%", f"%{q}%", f"%{q}%", q]
     if categoria:
         condiciones.append("categoria = ?")
         parametros.append(categoria)
     if subcategoria:
         condiciones.append("subcategoria = ?")
         parametros.append(subcategoria)
-    if modelo:
-        # coincidencia parcial: modelo_compatible suele traer varios autos
-        # juntos (ej. "VW Gol / Voyage"), así que buscar "Gol" tiene que
-        # encontrar ese producto igual, no exigir el campo completo.
-        condiciones.append("modelo_compatible LIKE ?")
-        parametros.append(f"%{modelo}%")
 
     consulta = "SELECT * FROM productos"
     if condiciones:
@@ -748,16 +748,13 @@ def productos_lista():
 
     categorias = db.obtener_categorias(conn)
     subcategorias_json = subcategorias_por_categoria_json(conn)
-    modelos_disponibles = [
-        r["modelo_compatible"] for r in conn.execute(
-            "SELECT DISTINCT modelo_compatible FROM productos WHERE modelo_compatible IS NOT NULL AND modelo_compatible != '' ORDER BY modelo_compatible"
-        )
-    ]
+    # mismo criterio de "mejor precio" que ya usa /pedidos (db.obtener_mejor_precio_por_producto),
+    # calculado solo, sin que haga falta elegir manualmente un proveedor.
+    mejores_precios = {p["id"]: db.obtener_mejor_precio_por_producto(conn, p["id"]) for p in productos}
     conn.close()
     return render_template(
         "productos.html", productos=productos, q=q, categoria=categoria, subcategoria=subcategoria,
-        modelo=modelo, categorias=categorias, subcategorias_json=subcategorias_json,
-        modelos_disponibles=modelos_disponibles,
+        categorias=categorias, subcategorias_json=subcategorias_json, mejores_precios=mejores_precios,
     )
 
 
@@ -1148,14 +1145,25 @@ def ventas_lista():
 @app.route("/ventas/dia")
 def ventas_dia():
     """Resumen de ventas de un día agrupado por medio de pago (efectivo,
-    transferencia, tarjeta, Mercado Pago), para el arqueo del local."""
+    transferencia, tarjeta, Mercado Pago), para el arqueo del local.
+    Filtrable por día puntual (`fecha`) y por medio de pago (`medio_pago`),
+    sin tocar el modelo de datos de ventas ni el flujo de carga — es
+    puramente una pantalla de lectura sobre lo que ya se registró."""
     conn = db.get_connection()
     fecha = request.args.get("fecha", "").strip() or datetime.now().strftime("%Y-%m-%d")
+    medio_pago = request.args.get("medio_pago", "").strip()
+
+    condiciones = ["fecha = ?"]
+    parametros = [fecha]
+    if medio_pago:
+        condiciones.append("metodo_pago = ?")
+        parametros.append(medio_pago)
+    where = " AND ".join(condiciones)
 
     resumen = conn.execute(
-        """SELECT metodo_pago, COUNT(*) AS cantidad, COALESCE(SUM(total),0) AS total
-           FROM ventas WHERE fecha = ? GROUP BY metodo_pago ORDER BY total DESC""",
-        (fecha,),
+        f"""SELECT metodo_pago, COUNT(*) AS cantidad, COALESCE(SUM(total),0) AS total
+            FROM ventas WHERE {where} GROUP BY metodo_pago ORDER BY total DESC""",
+        parametros,
     ).fetchall()
     total_dia = sum(r["total"] for r in resumen)
 
@@ -1163,20 +1171,26 @@ def ventas_dia():
     # id_operacion (un mismo pago dividido en efectivo + tarjeta, por
     # ejemplo) cuentan como una sola, no dos.
     cant_operaciones = conn.execute(
-        "SELECT COUNT(DISTINCT COALESCE(id_operacion, 'v' || id)) AS c FROM ventas WHERE fecha = ?",
-        (fecha,),
+        f"SELECT COUNT(DISTINCT COALESCE(id_operacion, 'v' || id)) AS c FROM ventas WHERE {where}",
+        parametros,
     ).fetchone()["c"]
 
     ventas = conn.execute(
-        """SELECT v.*, c.nombre AS cliente_nombre
-           FROM ventas v LEFT JOIN clientes c ON c.id = v.cliente_id
-           WHERE v.fecha = ? ORDER BY v.id DESC""",
-        (fecha,),
+        f"""SELECT v.*, c.nombre AS cliente_nombre
+            FROM ventas v LEFT JOIN clientes c ON c.id = v.cliente_id
+            WHERE {where} ORDER BY v.id DESC""",
+        parametros,
     ).fetchall()
+
+    medios_pago_disponibles = [
+        r["metodo_pago"] for r in conn.execute(
+            "SELECT DISTINCT metodo_pago FROM ventas WHERE metodo_pago IS NOT NULL AND metodo_pago != '' ORDER BY metodo_pago"
+        )
+    ]
     conn.close()
     return render_template(
-        "ventas_dia.html", fecha=fecha, resumen=resumen, total_dia=total_dia,
-        cant_operaciones=cant_operaciones, ventas=ventas,
+        "ventas_dia.html", fecha=fecha, medio_pago=medio_pago, medios_pago_disponibles=medios_pago_disponibles,
+        resumen=resumen, total_dia=total_dia, cant_operaciones=cant_operaciones, ventas=ventas,
     )
 
 
@@ -1680,13 +1694,7 @@ def pedidos_lista():
     grupos = {}
     ahorro_total = 0
     for f in faltantes:
-        cotizaciones = conn.execute(
-            """SELECT pp.precio_costo, pp.codigo_proveedor, pr.nombre AS proveedor_nombre,
-                      pr.email AS proveedor_email, pr.telefono AS proveedor_telefono
-               FROM producto_proveedor pp JOIN proveedores pr ON pr.id = pp.proveedor_id
-               WHERE pp.producto_id = ? AND pr.activo = 1 ORDER BY pp.precio_costo ASC""",
-            (f["id"],),
-        ).fetchall()
+        cotizaciones = db.obtener_cotizaciones_producto(conn, f["id"])
 
         hay_alternativas = len(cotizaciones) > 1
         if cotizaciones:

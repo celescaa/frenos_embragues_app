@@ -8,9 +8,6 @@
 
 <form class="row g-2 mb-3" method="get" id="filtroForm">
   <div class="col-md-4">
-    <input type="text" name="q" value="{{ q }}" class="form-control" placeholder="Buscar por código, nombre o marca...">
-  </div>
-  <div class="col-md-3">
     <select name="categoria" id="categoriaFiltro" class="form-select">
       <option value="">-- Todas las categorías --</option>
       {% for cat in categorias %}
@@ -18,22 +15,17 @@
       {% endfor %}
     </select>
   </div>
-  <div class="col-md-3">
+  <div class="col-md-4">
     <select name="subcategoria" id="subcategoriaFiltro" class="form-select">
       <option value="">-- Todas las subcategorías --</option>
     </select>
   </div>
-  <div class="col-md-2">
-    <input type="text" name="modelo" id="modeloFiltro" value="{{ modelo }}" class="form-control" list="modelosDatalist" placeholder="Modelo de auto...">
-    <datalist id="modelosDatalist">
-      {% for m in modelos_disponibles %}
-        <option value="{{ m }}">
-      {% endfor %}
-    </datalist>
+  <div class="col-md-4">
+    <input type="text" name="q" value="{{ q }}" class="form-control" placeholder="Buscar por código, nombre, marca o modelo de auto (ej: Gol)...">
   </div>
   <div class="col-12">
     <button type="submit" class="btn btn-outline-primary btn-sm"><i class="bi bi-funnel"></i> Filtrar</button>
-    {% if q or categoria or subcategoria or modelo %}
+    {% if q or categoria or subcategoria %}
       <a href="{{ url_for('productos_lista') }}" class="btn btn-link btn-sm">Limpiar filtros</a>
     {% endif %}
   </div>
@@ -42,7 +34,7 @@
 <div class="card p-3">
   <table class="table table-hover align-middle mb-0">
     <thead>
-      <tr><th></th><th>Código</th><th>Nombre</th><th>Categoría</th><th>Marca</th><th>Compatible con</th><th class="text-end">Costo</th><th class="text-end">Precio</th><th class="text-end">Stock</th><th></th></tr>
+      <tr><th></th><th>Código</th><th>Nombre</th><th>Categoría</th><th>Marca</th><th>Compatible con</th><th class="text-end">Costo</th><th class="text-end">Precio</th><th class="text-end">Stock</th><th>Mejor precio</th><th></th></tr>
     </thead>
     <tbody>
     {% for p in productos %}
@@ -62,6 +54,15 @@
         <td class="text-end">{{ p.precio_costo|money }}</td>
         <td class="text-end">{{ p.precio_venta|money }}</td>
         <td class="text-end">{{ p.stock_actual }} <span class="text-muted">/ min {{ p.stock_minimo }}</span></td>
+        <td>
+          {% set mejor = mejores_precios[p.id] %}
+          {% if mejor %}
+            <span class="badge bg-secondary">{{ mejor.proveedor_nombre }}</span>
+            <span class="text-muted small">{{ mejor.precio_costo|money }}</span>
+          {% else %}
+            <span class="text-muted small">Sin cotizaciones cargadas</span>
+          {% endif %}
+        </td>
         <td class="text-end">
           <a href="{{ url_for('productos_editar', producto_id=p.id) }}" class="btn btn-sm btn-outline-secondary"><i class="bi bi-pencil"></i></a>
           <form method="post" action="{{ url_for('productos_eliminar', producto_id=p.id) }}" class="d-inline" onsubmit="return confirm('¿Eliminar este producto?');">
@@ -70,7 +71,7 @@
         </td>
       </tr>
     {% else %}
-      <tr><td colspan="10" class="text-center text-muted py-4">No hay productos cargados todavía.</td></tr>
+      <tr><td colspan="11" class="text-center text-muted py-4">No hay productos cargados todavía.</td></tr>
     {% endfor %}
     </tbody>
   </table>

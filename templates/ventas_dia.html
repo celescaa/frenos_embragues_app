@@ -10,6 +10,19 @@
   <div class="col-auto">
     <input type="date" name="fecha" value="{{ fecha }}" class="form-control" onchange="this.form.submit()">
   </div>
+  <div class="col-auto">
+    <select name="medio_pago" class="form-select" onchange="this.form.submit()">
+      <option value="">-- Todos los medios de pago --</option>
+      {% for m in medios_pago_disponibles %}
+        <option value="{{ m }}" {{ 'selected' if medio_pago == m else '' }}>{{ m }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  {% if medio_pago %}
+    <div class="col-auto">
+      <a href="{{ url_for('ventas_dia', fecha=fecha) }}" class="btn btn-link">Quitar filtro de medio de pago</a>
+    </div>
+  {% endif %}
 </form>
 
 <div class="row g-3 mb-4">
