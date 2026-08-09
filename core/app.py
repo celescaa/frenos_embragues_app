@@ -396,13 +396,27 @@ def dashboard():
 def clientes_lista():
     conn = db.get_connection()
     q = request.args.get("q", "").strip()
+    # Mismo cálculo de saldo que /clientes/top-deudores (cargos menos
+    # pagos), para no tener el criterio de "cuánto debe" duplicado con
+    # reglas distintas en dos pantallas.
+    saldo_expr = (
+        "COALESCE(SUM(CASE WHEN m.tipo='cargo' THEN m.monto ELSE 0 END), 0)"
+        " - COALESCE(SUM(CASE WHEN m.tipo='pago' THEN m.monto ELSE 0 END), 0) AS saldo"
+    )
     if q:
         clientes = conn.execute(
-            "SELECT * FROM clientes WHERE nombre LIKE ? OR telefono LIKE ? OR email LIKE ? ORDER BY nombre",
+            f"""SELECT c.*, {saldo_expr}
+                FROM clientes c LEFT JOIN cuenta_corriente_movimientos m ON m.cliente_id = c.id
+                WHERE c.nombre LIKE ? OR c.telefono LIKE ? OR c.email LIKE ?
+                GROUP BY c.id ORDER BY c.nombre""",
             (f"%{q}%", f"%{q}%", f"%{q}%"),
         ).fetchall()
     else:
-        clientes = conn.execute("SELECT * FROM clientes ORDER BY nombre").fetchall()
+        clientes = conn.execute(
+            f"""SELECT c.*, {saldo_expr}
+                FROM clientes c LEFT JOIN cuenta_corriente_movimientos m ON m.cliente_id = c.id
+                GROUP BY c.id ORDER BY c.nombre"""
+        ).fetchall()
     conn.close()
     return render_template("clientes.html", clientes=clientes, q=q)
 
