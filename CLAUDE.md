@@ -7,8 +7,14 @@ funciona con un Excel y sin sistema de clientes ni stock.
 ## Identidad del negocio
 
 - **Nombre comercial**: Repuestos San Ignacio — "Casa de frenos y embragues".
-- **Titular**: Caamaño Matías Ezequiel — CUIT 20-35075394-0 (monotributo,
-  categoría T1/Cat III; alta IVA 12-2024, alta autónomo 07-2016).
+- **Titular**: Caamaño Matías Ezequiel — CUIT 20-35075394-0 (**Responsable
+  Inscripto**, alta IVA 12-2024, alta autónomo 07-2016). Corregido el
+  09/08/2026: una versión anterior de este archivo y del código de
+  facturación asumía monotributo por error — la propia alta IVA 12-2024 ya
+  era evidencia de lo contrario (un monotributista no se da de alta en
+  IVA). Como Responsable Inscripto, el comprobante correcto es Factura A
+  (si el cliente también es Responsable Inscripto con CUIT) o Factura B
+  (cualquier otro caso), nunca Factura C — ver `facturacion_afip.py`.
 - **Dirección**: San Ignacio 2115, Ituzaingó Norte.
 - **WhatsApp**: +54 9 11 6130-5237.
 - **Redes**: Instagram @repuestos_sanignacio, Facebook "Repuestos San
@@ -141,46 +147,73 @@ Agregado después:
   que llama a `/api/clientes-nuevo` (POST) sin recargar la página, así no se
   pierde la venta que se está cargando. El cliente nuevo queda seleccionado
   automáticamente en el `<select>`.
-- **Facturación electrónica AFIP/ARCA (Factura C)** — implementada vía
+- **Facturación electrónica AFIP/ARCA (Factura A/B)** — implementada vía
   [Afip SDK](https://afipsdk.com) (paquete `afip.py` + `python-dotenv`, ver
   `requirements.txt`).
   - Regla de negocio (la pedida por el negocio, ver más abajo el aviso de
     cumplimiento): venta en **efectivo** → remito/recibo interno de siempre
     (se elige en el formulario). Venta en **tarjeta o transferencia** →
-    **Factura C** automática (no es una opción manual; en `venta_form.html`
-    el `<select>` de tipo de comprobante se deshabilita y se muestra un aviso
-    cuando el medio de pago lo dispara).
-  - `facturacion_afip.py`: módulo nuevo, standalone.
+    **Factura A o B** automática (no es una opción manual; en
+    `venta_form.html` el `<select>` de tipo de comprobante se deshabilita y
+    se muestra un aviso cuando el medio de pago lo dispara). El negocio es
+    **Responsable Inscripto** (corregido el 09/08/2026, ver "Identidad del
+    negocio" — una versión anterior de esto asumía monotributo por error y
+    solo emitía Factura C), así que cuál de las dos depende del receptor:
+    Factura A si es Responsable Inscripto con CUIT cargado, Factura B en
+    cualquier otro caso (Consumidor Final, Monotributista, Exento, o sin
+    CUIT/DNI). Columna `clientes.condicion_iva` (select en `cliente_form.html`,
+    valores en `facturacion_afip.CONDICIONES_IVA`) guarda esa condición;
+    default `consumidor_final` para no romper clientes ya cargados.
+  - `facturacion_afip.py`: módulo standalone.
     - `afip_configurado()` / `get_afip_client()`: leen `AFIPSDK_ACCESS_TOKEN`,
       `AFIPSDK_CUIT` (default: CUIT de prueba compartido
       `20409378472`), `AFIPSDK_PRODUCTION`, `AFIPSDK_PUNTO_VENTA`,
       `AFIPSDK_CERT`/`AFIPSDK_KEY` desde variables de entorno (`.env`, vía
       `python-dotenv`, cargado en `app.py` con `load_dotenv()`).
-    - `datos_receptor(cuit_dni)`: mapea el CUIT/DNI cargado en la ficha del
-      cliente a `DocTipo`/`DocNro`/`CondicionIVAReceptorId` de ARCA; sin
-      CUIT/DNI cargado cae a Consumidor Final.
-    - `emitir_factura_c(venta_id)`: hace `getLastVoucher` + `createVoucher`
+    - `datos_receptor(cuit_dni, condicion_iva)`: mapea CUIT/DNI + condición
+      IVA del cliente a `DocTipo`/`DocNro`/`CondicionIVAReceptorId` de ARCA
+      y decide `tipo_comprobante` ("Factura A" solo si es Responsable
+      Inscripto con CUIT de 11 dígitos, si no "Factura B"); sin CUIT/DNI
+      cargado cae a Consumidor Final/Factura B. **Limitación conocida**: no
+      hay forma de consultar el padrón de AFIP desde acá, así que "es
+      Responsable Inscripto" es lo que se cargó a mano — si está mal
+      cargado, la factura sale con el tipo equivocado.
+    - `_emitir_factura_arca(cuit_dni, condicion_iva, total, fecha)`: llamada
+      cruda a ARCA (no toca tablas), discrimina IVA a la tasa general 21%
+      (`ALICUOTA_IVA`, constante — no soporta productos con otra alícuota)
+      sobre el `total` que ya maneja el sistema (se asume con IVA
+      incluido, como se muestra al público) y arma el array `Iva` que
+      exige ARCA para Factura A/B (a diferencia de Factura C, que no lo
+      llevaba). Usada tanto por `emitir_factura()` (ventas) como por
+      `emitir_factura_movimiento()` (cargos de cuenta corriente).
+    - `emitir_factura(venta_id)`: hace `getLastVoucher` + `createVoucher`
       contra `afip.ElectronicBilling` (API confirmada leyendo el paquete
       instalado, no solo la documentación) y guarda `cae`,
-      `cae_vencimiento`, `punto_venta_arca`, `numero_factura_arca` en la
-      venta. **Nunca lanza una excepción hacia afuera**: si falla (o si no
-      hay `access_token` configurado), guarda `facturacion_estado`
+      `cae_vencimiento`, `punto_venta_arca`, `numero_factura_arca`,
+      `imp_neto`, `imp_iva`, `tipo_comprobante` en la venta. **Nunca lanza
+      una excepción hacia afuera**: si falla (o si no hay `access_token`
+      configurado), guarda `facturacion_estado`
       (`sin_configurar` / `error` / `emitida`) y `facturacion_error`, sin
       bloquear ni revertir la venta ya registrada.
     - `url_qr_venta(venta)`: arma la URL del QR según la especificación
-      RG 4291 de AFIP.
+      RG 4291 de AFIP, usando el `tipo_comprobante` real de la venta.
   - Migración idempotente en `database.py` (`_migrar`) agrega a `ventas`:
     `cae`, `cae_vencimiento`, `punto_venta_arca`, `numero_factura_arca`,
-    `facturacion_estado`, `facturacion_error`.
-  - `app.py`: `ventas_nueva()` llama a `emitir_factura_c()` después de
-    confirmar la venta (nunca antes ni dentro de la misma transacción, para
-    no arriesgar la venta si ARCA falla). Ruta nueva
-    `/ventas/<id>/facturar` (POST) para reintento manual.
-  - `comprobante.html`: si la venta es Factura C y tiene CAE, muestra CAE,
-    vencimiento, número de comprobante y un QR (generado vía
-    `api.qrserver.com`, sin librería nueva) en vez del aviso de "remito
-    interno". Si es Factura C pero todavía no tiene CAE (sin configurar o
-    con error), muestra un aviso con botón "Reintentar facturación".
+    `facturacion_estado`, `facturacion_error`, `imp_neto`, `imp_iva`; y a
+    `clientes`: `condicion_iva`.
+  - `app.py`: `registrar_venta()` calcula el `tipo_comprobante` ("Factura
+    A"/"Factura B") en el momento con `datos_receptor()` (sin llamar a
+    ARCA, solo para dejarlo etiquetado); `ventas_nueva()` llama a
+    `emitir_factura()` después de confirmar la venta (nunca antes ni
+    dentro de la misma transacción, para no arriesgar la venta si ARCA
+    falla), que recalcula y sobreescribe el mismo campo al emitir de
+    verdad. Ruta `/ventas/<id>/facturar` (POST) para reintento manual.
+  - `comprobante.html`/`comprobante_pdf.html`: si la venta es Factura A/B y
+    tiene CAE, muestran CAE, vencimiento, número de comprobante, desglose
+    Neto/IVA/Total y un QR (generado vía `api.qrserver.com`, sin librería
+    nueva) en vez del aviso de "remito interno". Si es Factura A/B pero
+    todavía no tiene CAE (sin configurar o con error), muestran un aviso
+    con botón "Reintentar facturación".
   - `.env.example` documenta todas las variables; `.env` real está en
     `.gitignore` (nunca se sube ni se pega en el chat).
   - **Pendiente para que factura de verdad**: alguien con acceso al negocio
@@ -190,7 +223,8 @@ Agregado después:
     funciona pero deja las ventas con tarjeta/transferencia marcadas como
     "sin_configurar", reintentables desde el comprobante.
   - Ya probado sin necesitar un `access_token` real: la migración de la
-    base, el mapeo de receptor, la construcción de la URL del QR, y que el
+    base, el mapeo de receptor (Factura A vs B según condición IVA), el
+    cálculo de neto/IVA, la construcción de la URL del QR, y que el
     flujo de venta nunca se rompe ni se bloquea cuando falta la
     configuración (queda en `facturacion_estado='sin_configurar'`). Falta
     probar la emisión real contra ARCA (ambiente de homologación) en cuanto
@@ -200,8 +234,8 @@ Agregado después:
   más abajo para el detalle técnico y lo que falta para que cobre de verdad.
   Comparte las mismas tablas `ventas`/`venta_items`/`productos` que la venta
   del local: cuando Mercado Pago confirma un pago, se genera ahí mismo una
-  venta real (mismo stock, misma Factura C automática) — no hay dos stocks
-  que sincronizar, tal como se definió en la visión de producto.
+  venta real (mismo stock, misma Factura A/B automática) — no hay dos
+  stocks que sincronizar, tal como se definió en la visión de producto.
 - **Foto de producto**: campo opcional en la ficha (JPG/PNG/WEBP), se guarda
   en `static/img/productos/` (fuera de git, son datos del negocio) y se
   muestra tanto en el listado de Stock como en el catálogo de la tienda.
@@ -397,7 +431,7 @@ Agregado después:
   activada), no la contraseña normal de la cuenta.
   Ya probado sin credenciales SMTP reales: que el botón solo aparece con
   email cargado, que sin configurar avisa en vez de romper, que el PDF se
-  genera bien (logo, tabla de items, CAE/QR si es Factura C) y que el envío
+  genera bien (logo, tabla de items, CAE/QR si es Factura A/B) y que el envío
   arma bien el mensaje (asunto, adjunto, destinatario) simulando el
   servidor SMTP. Falta probar el envío real en cuanto haya credenciales.
 - **Subcategorías (jerarquía estricta, 06/08/2026)**: a pedido de Celes, que
@@ -531,26 +565,48 @@ Agregado después:
     sin tocar el modelo de ventas — se completa a mano en un campo nuevo
     de `venta_form.html`, con la explicación de uso ahí mismo.
   - **Cuenta corriente de clientes** (columna `clientes.tipo_cliente`
-    `particular`/`mecanico`; tabla nueva `cuenta_corriente_movimientos`;
+    `particular`/`mecanico`; tabla `cuenta_corriente_movimientos`;
     pantalla `/clientes/<id>/cuenta-corriente`, accesible desde un ícono en
     `/clientes` solo para clientes tipo "mecánico"): registra cargos y
-    pagos con saldo acumulado. `cliente_tercero_nombre` es texto libre de
-    referencia (para qué auto/cliente final fue el repuesto), no crea una
-    ficha de cliente aparte. Cada cargo dispara una Factura C a nombre del
-    cliente mecánico (nunca del tercero), reutilizando ARCA: se separó
-    `facturacion_afip.emitir_factura_c()` en una llamada cruda a ARCA
-    (`_emitir_factura_c_arca()`, sin tocar ninguna tabla) más el guardado
-    específico de cada caso — `emitir_factura_c()` sigue escribiendo en
-    `ventas` exactamente como antes, y la nueva `emitir_factura_c_movimiento()`
+    pagos con saldo acumulado. Cada cargo dispara una Factura A o B (según
+    la condición IVA del receptor, ver más abajo), reutilizando ARCA: se
+    separó `facturacion_afip.emitir_factura()` en una llamada cruda a ARCA
+    (`_emitir_factura_arca()`, sin tocar ninguna tabla) más el guardado
+    específico de cada caso — `emitir_factura()` sigue escribiendo en
+    `ventas` exactamente como antes, y `emitir_factura_movimiento()`
     escribe en `cuenta_corriente_movimientos` (mismas columnas
-    `cae`/`cae_vencimiento`/`facturacion_estado`/`facturacion_error` que ya
-    tenía `ventas`). Mismo criterio defensivo de siempre: nunca bloquea el
-    movimiento si ARCA falla, con botón de reintento igual al que ya tenía
-    el comprobante de una venta. Si el monto de un cargo supera
+    `cae`/`cae_vencimiento`/`facturacion_estado`/`facturacion_error`/
+    `imp_neto`/`imp_iva`/`tipo_comprobante` que ya tenía `ventas`). Mismo
+    criterio defensivo de siempre: nunca bloquea el movimiento si ARCA
+    falla, con botón de reintento igual al que ya tenía el comprobante de
+    una venta. Si el monto de un cargo supera
     `facturacion_afip.UMBRAL_IDENTIFICACION_RECEPTOR` (constante con nota
     de que ARCA la cambia por resolución y hay que revisarla contra la
-    normativa vigente) y el cliente no tiene CUIT/DNI cargado, el sistema
-    no deja registrar el cargo hasta que se cargue.
+    normativa vigente) y no hay ningún CUIT/DNI para identificar al
+    receptor, el sistema no deja registrar el cargo hasta que se cargue uno.
+    - **Rediseño a pedido de Celes tras la primera versión (09/08/2026)**:
+      la primera versión tenía tres problemas de uso real. (1) Un cargo
+      solo podía tener un producto y no descontaba stock — pero si el
+      mecánico se lleva el repuesto, el producto ya salió del local aunque
+      todavía no se haya cobrado. Ahora un cargo es una lista de productos
+      (tabla nueva `cuenta_corriente_movimiento_items`, mismo patrón que
+      `venta_items`, con el mismo buscador tipo autocompletar que Nueva
+      venta/Nueva compra) y **descuenta stock al confirmarse**, igual
+      criterio que una venta al contado (el stock baja cuando el producto
+      sale, no cuando se termina de cobrar). (2) La factura se emitía
+      siempre a nombre del cliente/mecánico dueño de la cuenta — pero en la
+      práctica el mecánico a veces compra en nombre de un tercero con su
+      propio CUIT/DNI (ej. "José compra a nombre de Marta", la factura
+      corresponde a Marta). Columnas nuevas `tercero_cuit_dni` y
+      `tercero_condicion_iva`: si se carga el CUIT/DNI del tercero,
+      `emitir_factura_movimiento()` factura a nombre de ese tercero (con su
+      propia condición IVA, no la del mecánico) en vez del cliente/mecánico;
+      `cliente_tercero_nombre` (ya existía) sigue de referencia visual en
+      los dos casos. (3) No había forma de ver rápido quién debía más —
+      pantalla nueva `/clientes/top-deudores` (link desde `/clientes` y
+      desde cada cuenta corriente), top 5 por saldo pendiente
+      (`SUM(cargos) - SUM(pagos)`) entre los clientes con movimientos
+      cargados.
   - **Ranking de clientes + descuentos aprobados** (`/clientes/top`, link
     nuevo desde `/clientes`): mismo cálculo de top 5 que ya tenía el panel
     de analítica, pero con período elegible (30/90/365 días o histórico) y
@@ -622,7 +678,7 @@ frenos_embragues_app/
 ├── core/                      # el núcleo del sistema en sí
 │   ├── app.py                   # rutas y lógica (Flask) — el archivo grande
 │   ├── database.py              # esquema + migraciones + datos de ejemplo
-│   ├── facturacion_afip.py      # integración Afip SDK (Factura C)
+│   ├── facturacion_afip.py      # integración Afip SDK (Factura A/B)
 │   ├── tienda_pagos.py          # integración Mercado Pago (tienda online)
 │   ├── comprobante_pdf.py       # genera el PDF del comprobante (xhtml2pdf)
 │   ├── envio_mail.py            # envío del comprobante por mail (SMTP)
@@ -730,13 +786,25 @@ Orden acordado con Celes (actualizado 04/08/2026):
 
 ## Facturación electrónica AFIP/ARCA (implementada, falta la cuenta real)
 
-Contexto importante: como monotributista, ARCA exige **Factura C en todas
-las ventas**, sin importar el medio de pago ni el monto — no hay excepción
-para efectivo. Se le avisó esto a Celes explícitamente. **Decisión tomada
-igual**: mantener la regla original que pidió — efectivo → remito interno
-(ya implementado), tarjeta/transferencia → Factura C electrónica por ARCA.
-Queda pendiente que lo confirme con su contador; no es responsabilidad de
-este sistema decidir eso, solo se avisó una vez.
+**Corrección importante (09/08/2026)**: hasta acá este archivo y el código
+de facturación asumían que el negocio era monotributista y por eso solo
+emitían Factura C. Celes aclaró que el negocio es **Responsable Inscripto**
+(coherente con "alta IVA 12-2024" en la identidad del negocio, que ya
+estaba anotado arriba pero no se había cruzado con esta sección). Como
+Responsable Inscripto no hay excepción de "siempre el mismo tipo de
+comprobante": corresponde **Factura A** cuando el receptor también es
+Responsable Inscripto con CUIT cargado, o **Factura B** en cualquier otro
+caso (Consumidor Final, Monotributista, Exento, o sin documento) — nunca
+Factura C. Se reimplementó `facturacion_afip.py` para elegir A/B según
+`clientes.condicion_iva` y discriminar IVA (21%, tasa general) en la
+llamada a ARCA. La regla de *cuándo* facturar sigue siendo la misma que
+pidió el negocio originalmente: efectivo → remito interno (ya
+implementado), tarjeta/transferencia → factura electrónica por ARCA (antes
+siempre C, ahora A o B según corresponda). Limitación conocida y avisada:
+el sistema no consulta el padrón de AFIP, así que "es Responsable
+Inscripto" es lo que se cargue a mano en la ficha del cliente — si esa
+condición está mal cargada, la factura sale con el tipo equivocado; no es
+responsabilidad de este sistema validarlo contra AFIP.
 
 Camino técnico elegido: **Afip SDK** (afipsdk.com) en vez de integración
 directa con el WSFE de ARCA. Motivo: mismo resultado funcional (CAE, QR,
@@ -773,8 +841,9 @@ paralelo**. `pedidos_web`/`pedido_web_items` son solo una tabla de "carrito
 en tránsito" mientras se espera la confirmación del pago; en cuanto Mercado
 Pago confirma que se pagó, el webhook llama a la misma función
 `registrar_venta()` que usa la pantalla de Nueva venta del local — mismas
-tablas `ventas`/`venta_items`, mismo stock, mismo criterio de Factura C
-automática (tarjeta/transferencia/Mercado Pago → Factura C). Así el stock
+tablas `ventas`/`venta_items`, mismo stock, mismo criterio de Factura A/B
+automática (tarjeta/transferencia/Mercado Pago → Factura A o B, según el
+receptor). Así el stock
 online y el del local literalmente no se pueden desincronizar: son la misma
 fila de la misma tabla.
 
@@ -807,8 +876,10 @@ Estructura:
   `ventas_nueva()` para que la compartan ambos flujos.
 - Si el comprador no existe todavía como cliente (por email o teléfono), el
   webhook crea uno automáticamente con los datos que dejó en el checkout
-  (incluye un campo opcional de CUIT/DNI para que la Factura C no caiga
-  siempre en Consumidor Final).
+  (incluye un campo opcional de CUIT/DNI; sin `condicion_iva` explícita el
+  comprador online queda en Consumidor Final por default, así que sale
+  Factura B — nunca se le va a emitir Factura A a un comprador de la
+  tienda sin que alguien confirme a mano que es Responsable Inscripto).
 
 **Pendiente real para que cobre de verdad** (dos cosas, ninguna la puede
 hacer este asistente en nombre del negocio):
@@ -822,7 +893,7 @@ hacer este asistente en nombre del negocio):
 Ya probado sin necesitar credenciales reales de Mercado Pago: la migración
 de la base, el catálogo, el carrito (sesión), que el checkout no se rompe
 si falta configuración, y que el webhook procesa correctamente un pago
-"aprobado" simulado (genera la venta, descuenta stock, dispara Factura C).
+"aprobado" simulado (genera la venta, descuenta stock, dispara Factura A/B).
 Falta probar el flujo real de Checkout Pro (redirección + webhook real) en
 cuanto haya `access_token` + URL pública.
 

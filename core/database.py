@@ -171,13 +171,20 @@ CREATE TABLE IF NOT EXISTS usuarios (
     fecha_creacion TEXT NOT NULL
 );
 
--- Cuenta corriente de clientes (típicamente mecánicos que compran a crédito).
--- cliente_tercero_nombre es solo texto de referencia (para qué auto/cliente
--- final fue el repuesto), no crea una ficha de cliente aparte.
+-- Cuenta corriente de clientes (típicamente mecánicos que compran a crédito
+-- para un tercero). Un cargo puede tener varios productos (ver
+-- cuenta_corriente_movimiento_items, análoga a venta_items) y, cuando el
+-- comprador real es un tercero identificado con su propio CUIT/DNI
+-- (tercero_cuit_dni), la Factura C se emite a nombre de ese tercero en vez
+-- del cliente/mecánico dueño de la cuenta — cliente_tercero_nombre queda
+-- como el nombre de referencia en los dos casos (facturado o no).
+-- producto_id quedó de una versión anterior (un cargo = un solo producto),
+-- ya no se usa para cargos nuevos.
 CREATE TABLE IF NOT EXISTS cuenta_corriente_movimientos (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     cliente_id INTEGER NOT NULL,
     cliente_tercero_nombre TEXT,
+    tercero_cuit_dni TEXT,
     producto_id INTEGER,
     monto REAL NOT NULL,
     tipo TEXT NOT NULL,
@@ -193,6 +200,21 @@ CREATE TABLE IF NOT EXISTS cuenta_corriente_movimientos (
     FOREIGN KEY (cliente_id) REFERENCES clientes(id),
     FOREIGN KEY (producto_id) REFERENCES productos(id),
     FOREIGN KEY (venta_id) REFERENCES ventas(id)
+);
+
+-- Productos de un cargo de cuenta corriente (un cargo = varios productos que
+-- el mecánico se lleva a crédito, mismo patrón que venta_items). El stock se
+-- descuenta al confirmar el cargo, igual que en una venta: el producto ya
+-- salió del local, solo falta que se pague.
+CREATE TABLE IF NOT EXISTS cuenta_corriente_movimiento_items (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    movimiento_id INTEGER NOT NULL,
+    producto_id INTEGER NOT NULL,
+    cantidad INTEGER NOT NULL,
+    precio_unitario REAL NOT NULL,
+    subtotal REAL NOT NULL,
+    FOREIGN KEY (movimiento_id) REFERENCES cuenta_corriente_movimientos(id),
+    FOREIGN KEY (producto_id) REFERENCES productos(id)
 );
 
 -- Compras/ventas sin factura (no pasan por compras/ventas ni por AFIP), pero
@@ -393,7 +415,15 @@ def _migrar(conn):
             ("subcategoria", "TEXT"),
         ],
         "proveedores": [("activo", "INTEGER NOT NULL DEFAULT 1")],
-        "clientes": [("tipo_cliente", "TEXT NOT NULL DEFAULT 'particular'")],
+        "clientes": [
+            ("tipo_cliente", "TEXT NOT NULL DEFAULT 'particular'"),
+            # condición frente al IVA del cliente (ver facturacion_afip.py,
+            # CONDICION_IVA_MAP) — determina si le corresponde Factura A
+            # (Responsable Inscripto con CUIT) o Factura B (cualquier otro
+            # caso). El negocio es Responsable Inscripto, no monotributista:
+            # ya no hay Factura C.
+            ("condicion_iva", "TEXT NOT NULL DEFAULT 'consumidor_final'"),
+        ],
         "ventas": [
             ("cae", "TEXT"),
             ("cae_vencimiento", "TEXT"),
@@ -405,6 +435,22 @@ def _migrar(conn):
             # (ej. mitad efectivo, mitad tarjeta) para no contarlas dos veces
             # en "cantidad de ventas" — ver /ventas/dia.
             ("id_operacion", "TEXT"),
+            # desglose de IVA de la Factura A/B emitida (total ya incluye el
+            # IVA, igual que precio_venta) — nulo mientras no haya CAE.
+            ("imp_neto", "REAL"),
+            ("imp_iva", "REAL"),
+        ],
+        "cuenta_corriente_movimientos": [
+            # CUIT/DNI del tercero real a nombre de quien se factura un cargo
+            # (si no se carga, se factura al cliente/mecánico dueño de la
+            # cuenta, comportamiento de siempre).
+            ("tercero_cuit_dni", "TEXT"),
+            # condición frente al IVA del tercero (solo relevante si se cargó
+            # tercero_cuit_dni) — mismos valores que clientes.condicion_iva.
+            ("tercero_condicion_iva", "TEXT"),
+            ("imp_neto", "REAL"),
+            ("imp_iva", "REAL"),
+            ("tipo_comprobante", "TEXT"),
         ],
     }
     for tabla, columnas in columnas_nuevas.items():

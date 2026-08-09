@@ -22,9 +22,20 @@
       <label class="form-label">Dirección</label>
       <input type="text" name="direccion" class="form-control" value="{{ cliente.direccion if cliente else '' }}">
     </div>
-    <div class="mb-3">
-      <label class="form-label">CUIT / DNI</label>
-      <input type="text" name="cuit_dni" class="form-control" value="{{ cliente.cuit_dni if cliente else '' }}">
+    <div class="row">
+      <div class="col-md-6 mb-3">
+        <label class="form-label">CUIT / DNI</label>
+        <input type="text" name="cuit_dni" class="form-control" value="{{ cliente.cuit_dni if cliente else '' }}">
+      </div>
+      <div class="col-md-6 mb-3">
+        <label class="form-label">Condición frente al IVA</label>
+        <select name="condicion_iva" class="form-select">
+          {% for valor, etiqueta in condiciones_iva %}
+            <option value="{{ valor }}" {{ 'selected' if (cliente.condicion_iva if cliente else 'consumidor_final') == valor else '' }}>{{ etiqueta }}</option>
+          {% endfor %}
+        </select>
+        <div class="form-text">Determina si le corresponde Factura A (Responsable Inscripto con CUIT) o Factura B.</div>
+      </div>
     </div>
     <div class="mb-3">
       <label class="form-label">Tipo de cliente</label>

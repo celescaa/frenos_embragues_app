@@ -1,5 +1,5 @@
 """
-Genera el PDF de un comprobante de venta (remito/recibo/Factura C), para
+Genera el PDF de un comprobante de venta (remito/recibo/Factura A/B), para
 adjuntarlo en el mail al cliente (ver envio_mail.py).
 
 Usa xhtml2pdf (pip install xhtml2pdf) en vez de WeasyPrint/wkhtmltopdf a

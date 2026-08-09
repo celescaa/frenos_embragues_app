@@ -3,7 +3,10 @@
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-3">
   <h4 class="mb-0"><i class="bi bi-journal-text"></i> Cuenta corriente — {{ cliente.nombre }}</h4>
-  <a href="{{ url_for('clientes_lista') }}" class="btn btn-link">Volver a Clientes</a>
+  <div>
+    <a href="{{ url_for('clientes_top_deudores') }}" class="btn btn-link">Top deudores</a>
+    <a href="{{ url_for('clientes_lista') }}" class="btn btn-link">Volver a Clientes</a>
+  </div>
 </div>
 
 <div class="row g-3 mb-4">
@@ -15,55 +18,100 @@
   </div>
 </div>
 
-<div class="card p-4 mb-4" style="max-width: 720px;">
+<div class="card p-4 mb-4" style="max-width: 900px;">
   <h6 class="mb-3">Nuevo movimiento</h6>
-  <form method="post" action="{{ url_for('cuenta_corriente_nueva', cliente_id=cliente.id) }}">
+  <form method="post" action="{{ url_for('cuenta_corriente_nueva', cliente_id=cliente.id) }}" id="movimientoForm">
     <div class="row">
       <div class="col-md-4 mb-3">
         <label class="form-label">Tipo</label>
-        <select name="tipo" class="form-select">
-          <option value="cargo">Cargo (compra a cuenta)</option>
+        <select name="tipo" id="tipoSelect" class="form-select">
+          <option value="cargo">Cargo (se lleva productos a cuenta)</option>
           <option value="pago">Pago (cancela deuda)</option>
         </select>
       </div>
-      <div class="col-md-4 mb-3">
-        <label class="form-label">Monto</label>
-        <input type="number" step="0.01" name="monto" class="form-control" required>
-      </div>
-      <div class="col-md-4 mb-3">
-        <label class="form-label">Producto (opcional)</label>
-        <select name="producto_id" class="form-select">
-          <option value="">-- Sin especificar --</option>
-          {% for p in productos_json %}
-            <option value="{{ p.id }}">{{ p.nombre }} ({{ p.codigo or 's/código' }})</option>
-          {% endfor %}
-        </select>
+    </div>
+
+    <div id="bloquePago" style="display:none;">
+      <div class="row">
+        <div class="col-md-4 mb-3">
+          <label class="form-label">Monto del pago</label>
+          <input type="number" step="0.01" name="monto" id="montoPago" class="form-control">
+        </div>
       </div>
     </div>
-    <div class="mb-3">
-      <label class="form-label">Cliente / auto del tercero (referencia, opcional)</label>
-      <input type="text" name="cliente_tercero_nombre" class="form-control" placeholder="Ej: para el Renault Clio de Juan Pérez">
-      <div class="form-text">Es solo un dato de trazabilidad. La Factura C, si corresponde, siempre se emite a nombre de {{ cliente.nombre }}.</div>
+
+    <div id="bloqueCargo">
+      <div class="d-flex justify-content-between align-items-center mb-2">
+        <label class="form-label mb-0">Productos que se lleva</label>
+        <button type="button" class="btn btn-sm btn-outline-primary" onclick="agregarFila()"><i class="bi bi-plus-lg"></i> Agregar producto</button>
+      </div>
+      <table class="table" id="itemsTable">
+        <thead><tr><th style="width:45%;">Producto</th><th style="width:120px;">Cantidad</th><th style="width:140px;">Precio unit.</th><th></th></tr></thead>
+        <tbody id="itemsBody"></tbody>
+        <tfoot>
+          <tr><td colspan="2" class="text-end fw-bold">Total del cargo</td><td colspan="2" id="totalCargo" class="fw-bold">$0</td></tr>
+        </tfoot>
+      </table>
+
+      <div class="row border-top pt-3 mt-2">
+        <div class="col-md-6 mb-3">
+          <label class="form-label">¿A nombre de quién es? (opcional)</label>
+          <input type="text" name="cliente_tercero_nombre" class="form-control" placeholder="Ej: para Marta, dueña del Renault Clio">
+          <div class="form-text">Solo referencia si se deja en blanco el CUIT/DNI de abajo. Si el mecánico compra en nombre de otra persona y esa persona tiene CUIT/DNI propio, cargalo para que la factura salga a su nombre.</div>
+        </div>
+        <div class="col-md-3 mb-3">
+          <label class="form-label">CUIT/DNI del tercero (opcional)</label>
+          <input type="text" name="tercero_cuit_dni" class="form-control">
+          <div class="form-text">Si se completa, la factura va a nombre de este CUIT/DNI en vez del de {{ cliente.nombre }}.</div>
+        </div>
+        <div class="col-md-3 mb-3">
+          <label class="form-label">Condición IVA del tercero</label>
+          <select name="tercero_condicion_iva" class="form-select">
+            {% for valor, etiqueta in condiciones_iva %}
+              <option value="{{ valor }}" {{ 'selected' if valor == 'consumidor_final' else '' }}>{{ etiqueta }}</option>
+            {% endfor %}
+          </select>
+          <div class="form-text">Solo importa si cargaste el CUIT/DNI de arriba.</div>
+        </div>
+      </div>
+      {% if not cliente.cuit_dni %}
+        <div class="alert alert-warning py-2">
+          <i class="bi bi-exclamation-triangle"></i> {{ cliente.nombre }} no tiene CUIT/DNI cargado en su ficha. Si el cargo
+          supera {{ umbral_identificacion|money }} y no cargás el CUIT/DNI del tercero de arriba, ARCA va a exigir
+          identificar al receptor y no vas a poder confirmar el cargo.
+        </div>
+      {% endif %}
     </div>
+
     <div class="mb-3">
       <label class="form-label">Observaciones</label>
       <input type="text" name="observaciones" class="form-control">
     </div>
-    {% if not cliente.cuit_dni %}
-      <div class="alert alert-warning py-2">
-        <i class="bi bi-exclamation-triangle"></i> Este cliente no tiene CUIT/DNI cargado. Si el cargo supera
-        {{ umbral_identificacion|money }}, ARCA va a exigirlo — cargalo en la ficha del cliente antes de registrar ese movimiento.
-      </div>
-    {% endif %}
     <button type="submit" class="btn btn-primary">Registrar movimiento</button>
   </form>
 </div>
+
+<template id="filaTemplate">
+  <tr>
+    <td>
+      <div class="position-relative">
+        <input type="text" class="form-control producto-buscar" autocomplete="off" required
+               placeholder="Buscar por nombre, código, marca o modelo de auto...">
+        <input type="hidden" name="producto_id" class="producto-id">
+        <div class="list-group producto-resultados position-absolute w-100 shadow" style="z-index: 1050; max-height: 260px; overflow-y: auto; display: none;"></div>
+      </div>
+    </td>
+    <td><input type="number" name="cantidad" min="1" value="1" class="form-control cantidad-input" required></td>
+    <td><input type="text" class="form-control precio-display" readonly></td>
+    <td><button type="button" class="btn btn-sm btn-outline-danger" onclick="this.closest('tr').remove(); actualizarTotalCargo();"><i class="bi bi-trash"></i></button></td>
+  </tr>
+</template>
 
 <div class="card p-3">
   <h6 class="mb-3">Historial</h6>
   <table class="table table-hover align-middle mb-0">
     <thead>
-      <tr><th>Fecha</th><th>Tipo</th><th>Producto</th><th>Referencia</th><th class="text-end">Monto</th><th>Factura C</th><th></th></tr>
+      <tr><th>Fecha</th><th>Tipo</th><th>Productos</th><th>A nombre de</th><th class="text-end">Monto</th><th>Factura</th><th></th></tr>
     </thead>
     <tbody>
     {% for m in movimientos %}
@@ -76,13 +124,25 @@
             <span class="badge bg-success">Pago</span>
           {% endif %}
         </td>
-        <td>{{ m.producto_nombre or '' }}</td>
-        <td>{{ m.cliente_tercero_nombre or '' }} {% if m.observaciones %}<div class="text-muted small">{{ m.observaciones }}</div>{% endif %}</td>
+        <td>
+          {% if m.renglones %}
+            <ul class="mb-0 ps-3 small">
+            {% for it in m.renglones %}
+              <li>{{ it.cantidad }} × {{ it.producto_nombre }} <span class="text-muted">({{ it.producto_codigo or 's/código' }})</span></li>
+            {% endfor %}
+            </ul>
+          {% endif %}
+        </td>
+        <td>
+          {{ m.cliente_tercero_nombre or '' }}
+          {% if m.tercero_cuit_dni %}<div class="text-muted small">CUIT/DNI: {{ m.tercero_cuit_dni }}</div>{% endif %}
+          {% if m.observaciones %}<div class="text-muted small">{{ m.observaciones }}</div>{% endif %}
+        </td>
         <td class="text-end">{{ m.monto|money }}</td>
         <td>
           {% if m.tipo == 'cargo' %}
             {% if m.facturacion_estado == 'emitida' %}
-              <span class="badge bg-success">CAE {{ m.cae }}</span>
+              <span class="badge bg-success">{{ m.tipo_comprobante }} · CAE {{ m.cae }}</span>
             {% elif m.facturacion_estado == 'sin_configurar' %}
               <span class="badge bg-warning text-dark">Sin configurar</span>
             {% elif m.facturacion_estado == 'error' %}
@@ -106,4 +166,134 @@
     </tbody>
   </table>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const PRODUCTOS = {{ productos_json|tojson }};
+
+function inicializarBuscador(fila) {
+  const buscarInput = fila.querySelector('.producto-buscar');
+  const idInput = fila.querySelector('.producto-id');
+  const resultados = fila.querySelector('.producto-resultados');
+  const precioInput = fila.querySelector('.precio-display');
+
+  function ocultar() { resultados.style.display = 'none'; resultados.innerHTML = ''; }
+
+  function mostrarResultados(lista) {
+    resultados.innerHTML = '';
+    if (lista.length === 0) {
+      const vacio = document.createElement('div');
+      vacio.className = 'list-group-item text-muted small';
+      vacio.textContent = 'No hay productos que coincidan.';
+      resultados.appendChild(vacio);
+      resultados.style.display = 'block';
+      return;
+    }
+    lista.slice(0, 8).forEach(function(p) {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'list-group-item list-group-item-action py-2';
+      const sinStock = p.stock_actual <= 0 ? ' <span class="text-danger">(sin stock)</span>' : '';
+      item.innerHTML = '<div class="d-flex justify-content-between align-items-center">' +
+        '<span>' + p.nombre + ' <span class="text-muted small">(' + (p.codigo || 's/código') + (p.marca ? ' · ' + p.marca : '') + ')</span></span>' +
+        '<span class="text-muted small">stock: ' + p.stock_actual + sinStock + '</span></div>';
+      item.addEventListener('mousedown', function(e) {
+        e.preventDefault();
+        idInput.value = p.id;
+        buscarInput.value = p.nombre + ' (' + (p.codigo || 's/código') + ')';
+        precioInput.value = '$' + p.precio_venta;
+        ocultar();
+        actualizarTotalCargo();
+      });
+      resultados.appendChild(item);
+    });
+    resultados.style.display = 'block';
+  }
+
+  buscarInput.addEventListener('input', function() {
+    idInput.value = '';
+    precioInput.value = '';
+    const q = buscarInput.value.trim().toLowerCase();
+    if (!q) { ocultar(); return; }
+    const filtrados = PRODUCTOS.filter(function(p) {
+      const texto = (p.nombre + ' ' + p.codigo + ' ' + p.marca + ' ' + p.modelo_compatible).toLowerCase();
+      return texto.includes(q);
+    });
+    mostrarResultados(filtrados);
+  });
+
+  buscarInput.addEventListener('focus', function() {
+    if (buscarInput.value.trim() && !idInput.value) buscarInput.dispatchEvent(new Event('input'));
+  });
+
+  fila.querySelector('.cantidad-input').addEventListener('input', actualizarTotalCargo);
+
+  document.addEventListener('mousedown', function(e) {
+    if (!fila.contains(e.target)) ocultar();
+  });
+}
+
+function agregarFila() {
+  const tpl = document.getElementById('filaTemplate');
+  const clone = tpl.content.cloneNode(true);
+  document.getElementById('itemsBody').appendChild(clone);
+  const fila = document.getElementById('itemsBody').lastElementChild;
+  inicializarBuscador(fila);
+  return fila;
+}
+
+function actualizarTotalCargo() {
+  let total = 0;
+  document.querySelectorAll('#itemsBody tr').forEach(function(fila) {
+    const idInput = fila.querySelector('.producto-id');
+    const precioInput = fila.querySelector('.precio-display');
+    const cantidad = parseInt(fila.querySelector('.cantidad-input').value || '0');
+    if (idInput.value && precioInput.value) {
+      const precio = parseFloat(precioInput.value.replace('$', ''));
+      total += precio * cantidad;
+    }
+  });
+  document.getElementById('totalCargo').textContent = '$' + total.toFixed(2);
+}
+
+agregarFila();
+
+// ---------------------------------------------------------------------------
+// Alternar entre "cargo" (productos) y "pago" (monto libre).
+// ---------------------------------------------------------------------------
+const tipoSelect = document.getElementById('tipoSelect');
+const bloqueCargo = document.getElementById('bloqueCargo');
+const bloquePago = document.getElementById('bloquePago');
+const montoPago = document.getElementById('montoPago');
+
+function actualizarTipo() {
+  const esCargo = tipoSelect.value === 'cargo';
+  bloqueCargo.style.display = esCargo ? '' : 'none';
+  bloquePago.style.display = esCargo ? 'none' : '';
+  montoPago.required = !esCargo;
+}
+tipoSelect.addEventListener('change', actualizarTipo);
+actualizarTipo();
+
+document.getElementById('movimientoForm').addEventListener('submit', function(e) {
+  if (tipoSelect.value !== 'cargo') return;
+  const filas = document.querySelectorAll('#itemsBody tr');
+  let hayProducto = false;
+  for (const fila of filas) {
+    const texto = fila.querySelector('.producto-buscar').value.trim();
+    const id = fila.querySelector('.producto-id').value;
+    if (texto && !id) {
+      e.preventDefault();
+      alert('Elegí el producto de la lista que aparece al escribir (no alcanza con tipear el nombre). Revisá la fila: "' + texto + '".');
+      return;
+    }
+    if (id) hayProducto = true;
+  }
+  if (!hayProducto) {
+    e.preventDefault();
+    alert('Agregá al menos un producto al cargo.');
+  }
+});
+</script>
 {% endblock %}
