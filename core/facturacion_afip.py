@@ -44,6 +44,13 @@ CUIT_PRUEBA_AFIPSDK = "20409378472"
 PUNTO_VENTA_DEFAULT = 1
 CBTE_TIPO_FACTURA_C = 11
 
+# Monto a partir del cual ARCA exige identificar al receptor de la Factura C
+# (no alcanza con Consumidor Final, hace falta CUIT/DNI cargado). Este valor
+# lo fija AFIP/ARCA por resolución y cambia periódicamente — revisar contra
+# la normativa vigente antes de confiar en él en producción. Usado por
+# core/app.py al cargar un cargo de cuenta corriente (ver /clientes/<id>/cuenta-corriente).
+UMBRAL_IDENTIFICACION_RECEPTOR = 419405
+
 # Tipos de documento del receptor (tabla FEParamGetTiposDoc de ARCA)
 DOC_TIPO_CUIT = 80
 DOC_TIPO_DNI = 96
@@ -130,39 +137,32 @@ def _construir_url_qr(cuit_negocio, punto_venta, tipo_cbte, numero_cbte, fecha_y
     return "https://www.afip.gob.ar/fe/qr/?p=%s" % data_b64
 
 
-def emitir_factura_c(venta_id):
-    """Emite (o reintenta emitir) la Factura C electrónica de una venta.
+def _emitir_factura_c_arca(cliente_cuit_dni, total, fecha):
+    """Llamada cruda a ARCA vía Afip SDK: no toca ninguna tabla, solo
+    devuelve el resultado. Punto único usado tanto por emitir_factura_c()
+    (ventas del local/tienda) como por emitir_factura_c_movimiento() (cargos
+    de cuenta corriente) — mismo criterio de facturación en los dos casos.
 
-    No lanza excepciones hacia afuera: cualquier error queda guardado en la
-    venta (facturacion_estado='error', facturacion_error=<detalle>) para
-    nunca interrumpir ni revertir la venta ya registrada en el sistema.
+    Devuelve un dict:
+      {"estado": "sin_configurar"} si falta AFIPSDK_ACCESS_TOKEN
+      {"estado": "error", "error": <detalle>} si falló la llamada a ARCA
+      {"estado": "emitida", "cae", "cae_vencimiento", "punto_venta", "numero"}
     """
-    conn = db.get_connection()
+    if not afip_configurado():
+        return {
+            "estado": "sin_configurar",
+            "error": "Falta configurar AFIPSDK_ACCESS_TOKEN (ver .env.example y README.md).",
+        }
+
     try:
-        venta = conn.execute(
-            """SELECT v.*, c.cuit_dni AS cliente_cuit_dni
-               FROM ventas v LEFT JOIN clientes c ON c.id = v.cliente_id WHERE v.id=?""",
-            (venta_id,),
-        ).fetchone()
-        if not venta:
-            return
-
-        if not afip_configurado():
-            conn.execute(
-                "UPDATE ventas SET facturacion_estado='sin_configurar', facturacion_error=? WHERE id=?",
-                ("Falta configurar AFIPSDK_ACCESS_TOKEN (ver .env.example y README.md).", venta_id),
-            )
-            conn.commit()
-            return
-
         afip = get_afip_client()
         punto_venta = int(os.environ.get("AFIPSDK_PUNTO_VENTA", PUNTO_VENTA_DEFAULT))
-        receptor = datos_receptor(venta["cliente_cuit_dni"])
-        fecha_cbte = datetime.strptime(venta["fecha"], "%Y-%m-%d").strftime("%Y%m%d")
+        receptor = datos_receptor(cliente_cuit_dni)
+        fecha_cbte = datetime.strptime(fecha, "%Y-%m-%d").strftime("%Y%m%d")
 
         ultimo = afip.ElectronicBilling.getLastVoucher(punto_venta, CBTE_TIPO_FACTURA_C)
         numero = ultimo + 1
-        total = round(float(venta["total"]), 2)
+        total = round(float(total), 2)
 
         data = {
             "CantReg": 1,
@@ -186,20 +186,84 @@ def emitir_factura_c(venta_id):
         }
 
         resultado = afip.ElectronicBilling.createVoucher(data)
-
-        conn.execute(
-            """UPDATE ventas SET
-                 cae=?, cae_vencimiento=?, punto_venta_arca=?, numero_factura_arca=?,
-                 facturacion_estado='emitida', facturacion_error=NULL, tipo_comprobante='Factura C'
-               WHERE id=?""",
-            (resultado["CAE"], resultado["CAEFchVto"], punto_venta, numero, venta_id),
-        )
-        conn.commit()
+        return {
+            "estado": "emitida",
+            "cae": resultado["CAE"],
+            "cae_vencimiento": resultado["CAEFchVto"],
+            "punto_venta": punto_venta,
+            "numero": numero,
+        }
     except Exception as e:
-        conn.execute(
-            "UPDATE ventas SET facturacion_estado='error', facturacion_error=? WHERE id=?",
-            (str(e), venta_id),
-        )
+        return {"estado": "error", "error": str(e)}
+
+
+def emitir_factura_c(venta_id):
+    """Emite (o reintenta emitir) la Factura C electrónica de una venta.
+
+    No lanza excepciones hacia afuera: cualquier error queda guardado en la
+    venta (facturacion_estado='error', facturacion_error=<detalle>) para
+    nunca interrumpir ni revertir la venta ya registrada en el sistema.
+    """
+    conn = db.get_connection()
+    try:
+        venta = conn.execute(
+            """SELECT v.*, c.cuit_dni AS cliente_cuit_dni
+               FROM ventas v LEFT JOIN clientes c ON c.id = v.cliente_id WHERE v.id=?""",
+            (venta_id,),
+        ).fetchone()
+        if not venta:
+            return
+
+        resultado = _emitir_factura_c_arca(venta["cliente_cuit_dni"], venta["total"], venta["fecha"])
+
+        if resultado["estado"] == "emitida":
+            conn.execute(
+                """UPDATE ventas SET
+                     cae=?, cae_vencimiento=?, punto_venta_arca=?, numero_factura_arca=?,
+                     facturacion_estado='emitida', facturacion_error=NULL, tipo_comprobante='Factura C'
+                   WHERE id=?""",
+                (resultado["cae"], resultado["cae_vencimiento"], resultado["punto_venta"], resultado["numero"], venta_id),
+            )
+        else:
+            conn.execute(
+                "UPDATE ventas SET facturacion_estado=?, facturacion_error=? WHERE id=?",
+                (resultado["estado"], resultado.get("error"), venta_id),
+            )
+        conn.commit()
+    finally:
+        conn.close()
+
+
+def emitir_factura_c_movimiento(movimiento_id):
+    """Igual que emitir_factura_c(), pero para un cargo de cuenta corriente
+    (core/app.py, /clientes/<id>/cuenta-corriente). El receptor de la
+    factura es siempre el cliente mecánico de la cuenta corriente (a quien
+    se le cobra), nunca el tercero que figura solo como referencia."""
+    conn = db.get_connection()
+    try:
+        mov = conn.execute(
+            """SELECT m.*, c.cuit_dni AS cliente_cuit_dni
+               FROM cuenta_corriente_movimientos m JOIN clientes c ON c.id = m.cliente_id WHERE m.id=?""",
+            (movimiento_id,),
+        ).fetchone()
+        if not mov:
+            return
+
+        resultado = _emitir_factura_c_arca(mov["cliente_cuit_dni"], mov["monto"], mov["fecha"][:10])
+
+        if resultado["estado"] == "emitida":
+            conn.execute(
+                """UPDATE cuenta_corriente_movimientos SET
+                     cae=?, cae_vencimiento=?, punto_venta_arca=?, numero_factura_arca=?,
+                     facturacion_estado='emitida', facturacion_error=NULL
+                   WHERE id=?""",
+                (resultado["cae"], resultado["cae_vencimiento"], resultado["punto_venta"], resultado["numero"], movimiento_id),
+            )
+        else:
+            conn.execute(
+                "UPDATE cuenta_corriente_movimientos SET facturacion_estado=?, facturacion_error=? WHERE id=?",
+                (resultado["estado"], resultado.get("error"), movimiento_id),
+            )
         conn.commit()
     finally:
         conn.close()

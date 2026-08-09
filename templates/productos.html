@@ -6,8 +6,37 @@
   <a href="{{ url_for('productos_nuevo') }}" class="btn btn-primary"><i class="bi bi-plus-lg"></i> Nuevo producto</a>
 </div>
 
-<form class="mb-3" method="get">
-  <input type="text" name="q" value="{{ q }}" class="form-control" placeholder="Buscar por código, nombre o marca...">
+<form class="row g-2 mb-3" method="get" id="filtroForm">
+  <div class="col-md-4">
+    <input type="text" name="q" value="{{ q }}" class="form-control" placeholder="Buscar por código, nombre o marca...">
+  </div>
+  <div class="col-md-3">
+    <select name="categoria" id="categoriaFiltro" class="form-select">
+      <option value="">-- Todas las categorías --</option>
+      {% for cat in categorias %}
+        <option value="{{ cat }}" {{ 'selected' if categoria == cat else '' }}>{{ cat }}</option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-md-3">
+    <select name="subcategoria" id="subcategoriaFiltro" class="form-select">
+      <option value="">-- Todas las subcategorías --</option>
+    </select>
+  </div>
+  <div class="col-md-2">
+    <input type="text" name="marca" id="marcaFiltro" value="{{ marca }}" class="form-control" list="marcasDatalist" placeholder="Marca...">
+    <datalist id="marcasDatalist">
+      {% for m in marcas_disponibles %}
+        <option value="{{ m }}">
+      {% endfor %}
+    </datalist>
+  </div>
+  <div class="col-12">
+    <button type="submit" class="btn btn-outline-primary btn-sm"><i class="bi bi-funnel"></i> Filtrar</button>
+    {% if q or categoria or subcategoria or marca %}
+      <a href="{{ url_for('productos_lista') }}" class="btn btn-link btn-sm">Limpiar filtros</a>
+    {% endif %}
+  </div>
 </form>
 
 <div class="card p-3">
@@ -46,4 +75,29 @@
     </tbody>
   </table>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const subcategoriasPorCategoria = {{ subcategorias_json|tojson }};
+const subcategoriaActual = {{ subcategoria|tojson }};
+
+function actualizarSubcategoriasFiltro(preseleccionar) {
+  const categoria = document.getElementById('categoriaFiltro').value;
+  const select = document.getElementById('subcategoriaFiltro');
+  const opciones = subcategoriasPorCategoria[categoria] || [];
+  select.innerHTML = '<option value="">-- Todas las subcategorías --</option>';
+  opciones.forEach(function(nombre) {
+    const opt = document.createElement('option');
+    opt.value = nombre;
+    opt.textContent = nombre;
+    if (preseleccionar && nombre === subcategoriaActual) opt.selected = true;
+    select.appendChild(opt);
+  });
+}
+document.getElementById('categoriaFiltro').addEventListener('change', function() {
+  actualizarSubcategoriasFiltro(false);
+});
+actualizarSubcategoriasFiltro(true);
+</script>
 {% endblock %}

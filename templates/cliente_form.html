@@ -26,6 +26,14 @@
       <label class="form-label">CUIT / DNI</label>
       <input type="text" name="cuit_dni" class="form-control" value="{{ cliente.cuit_dni if cliente else '' }}">
     </div>
+    <div class="mb-3">
+      <label class="form-label">Tipo de cliente</label>
+      <select name="tipo_cliente" class="form-select">
+        <option value="particular" {{ 'selected' if not cliente or cliente.tipo_cliente == 'particular' else '' }}>Particular</option>
+        <option value="mecanico" {{ 'selected' if cliente and cliente.tipo_cliente == 'mecanico' else '' }}>Mecánico (compra a cuenta corriente)</option>
+      </select>
+      <div class="form-text">Un cliente "Mecánico" habilita la pantalla de cuenta corriente para cargarle deuda y registrar pagos.</div>
+    </div>
     <button type="submit" class="btn btn-primary">Guardar</button>
     <a href="{{ url_for('clientes_lista') }}" class="btn btn-link">Cancelar</a>
   </form>

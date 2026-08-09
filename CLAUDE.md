@@ -489,6 +489,109 @@ Agregado después:
   ese mismo archivo eran solo para mostrar la estructura de columnas, según
   aclaró Celes — no son stock real todavía, queda pendiente que se
   completen de verdad.
+- **Seis mejoras implementadas en una tanda (08/08/2026)**, sobre un prompt
+  de implementación que Celes ya había armado con Claude en otro chat,
+  respetando los patrones ya existentes (migraciones idempotentes, alta
+  rápida vía modal + `/api/...-nuevo`, módulos externos que nunca lanzan
+  excepción):
+  - **Filtro Categoría→Subcategoría→Marca en `/productos`**: filtros GET
+    (`categoria`, `subcategoria`, `marca`) combinables con el buscador de
+    texto ya existente. El desplegable de subcategoría se repuebla en
+    cascada con el mismo JSON (`subcategorias_por_categoria_json()`) que ya
+    usaban la ficha de producto y el buscador de compras. El filtro de
+    marca es un `<input>` con `<datalist>` (no un desplegable fijo) y
+    también busca coincidencias en el nombre del producto, para no
+    depender de que `marca` esté siempre cargada como campo separado.
+  - **Ventas del día por medio de pago** (`/ventas/dia`, link nuevo desde
+    `/ventas`): resumen agrupado por `metodo_pago` con cantidad y total,
+    más el detalle de cada venta del día. Para pagos mixtos (parte
+    efectivo, parte tarjeta/transferencia) se suma la columna
+    `ventas.id_operacion` (texto libre, opcional): se cargan dos ventas
+    separadas con el mismo valor ahí y el conteo de "operaciones" las
+    cuenta como una sola (`COUNT(DISTINCT COALESCE(id_operacion, 'v'||id))`)
+    sin tocar el modelo de ventas — se completa a mano en un campo nuevo
+    de `venta_form.html`, con la explicación de uso ahí mismo.
+  - **Cuenta corriente de clientes** (columna `clientes.tipo_cliente`
+    `particular`/`mecanico`; tabla nueva `cuenta_corriente_movimientos`;
+    pantalla `/clientes/<id>/cuenta-corriente`, accesible desde un ícono en
+    `/clientes` solo para clientes tipo "mecánico"): registra cargos y
+    pagos con saldo acumulado. `cliente_tercero_nombre` es texto libre de
+    referencia (para qué auto/cliente final fue el repuesto), no crea una
+    ficha de cliente aparte. Cada cargo dispara una Factura C a nombre del
+    cliente mecánico (nunca del tercero), reutilizando ARCA: se separó
+    `facturacion_afip.emitir_factura_c()` en una llamada cruda a ARCA
+    (`_emitir_factura_c_arca()`, sin tocar ninguna tabla) más el guardado
+    específico de cada caso — `emitir_factura_c()` sigue escribiendo en
+    `ventas` exactamente como antes, y la nueva `emitir_factura_c_movimiento()`
+    escribe en `cuenta_corriente_movimientos` (mismas columnas
+    `cae`/`cae_vencimiento`/`facturacion_estado`/`facturacion_error` que ya
+    tenía `ventas`). Mismo criterio defensivo de siempre: nunca bloquea el
+    movimiento si ARCA falla, con botón de reintento igual al que ya tenía
+    el comprobante de una venta. Si el monto de un cargo supera
+    `facturacion_afip.UMBRAL_IDENTIFICACION_RECEPTOR` (constante con nota
+    de que ARCA la cambia por resolución y hay que revisarla contra la
+    normativa vigente) y el cliente no tiene CUIT/DNI cargado, el sistema
+    no deja registrar el cargo hasta que se cargue.
+  - **Ranking de clientes + descuentos aprobados** (`/clientes/top`, link
+    nuevo desde `/clientes`): mismo cálculo de top 5 que ya tenía el panel
+    de analítica, pero con período elegible (30/90/365 días o histórico) y
+    una columna de margen estimado (con el costo *actual* de cada
+    producto — aproximación aclarada en la pantalla, no es un número
+    contable exacto). Desde ahí se puede "Aplicar promoción" a un cliente:
+    tablas nuevas `promociones_aplicadas` (porcentaje o monto fijo, alcance
+    todo el catálogo o productos puntuales, vigencia con fecha de inicio y
+    fin opcional, queda quién la aprobó) y `promocion_productos` (tabla
+    intermedia para el alcance puntual). `registrar_venta()` llama a la
+    función nueva `aplicar_promociones()` antes de calcular el total: los
+    descuentos porcentuales se aplican por ítem alcanzado, los de monto
+    fijo (solo con alcance "todo") se prorratean sobre el total de la
+    venta. Se aplica igual en la venta del local que en la de la tienda
+    online (mismo `registrar_venta()`).
+  - **Compras/ventas sin factura** (tabla nueva `movimientos_no_facturados`;
+    pantalla `/stock/no-facturado`, link nuevo en el menú Stock): para
+    movimientos de stock que no ameritan pasar por una compra/venta formal
+    ni por AFIP. Alta con el mismo buscador de productos tipo autocompletar
+    que ya usaban Nueva venta/Nueva compra. Al confirmar, sí impacta
+    `productos.stock_actual` (+cantidad si es compra, -cantidad si es
+    venta, validando que no quede negativo) — es la misma columna de
+    stock de siempre, la separación es solo en cómo se *registra* la
+    operación, no en el stock resultante. Campo `conciliado` (checkbox)
+    para marcar a mano si después se terminó cargando también como
+    compra/venta facturada normal (para no duplicar el efecto sobre stock,
+    revisión manual, no automática).
+  - **`scripts/matchear_productos_proveedores.py`** (offline, no lo llama
+    la app): puebla `producto_proveedor` automáticamente matcheando las
+    listas de precios de varios proveedores (un Excel con una hoja por
+    proveedor, mismo formato que ya usan `generar_planilla_stock_proveedores.py`/
+    `extraer_catalogo_referencia.py` — encabezados detectados por nombre,
+    no por posición fija, para servir a los dos) contra el catálogo ya
+    cargado en `productos`. Matching en orden: código de barras exacto
+    primero, si no hay o no matchea cae a similitud de texto por
+    descripción (`difflib`, mismo criterio que `importar_factura.py`)
+    filtrando por igual categoría. Nunca toca `productos` ni stock, solo
+    `producto_proveedor` (y crea el proveedor si el nombre de la hoja
+    todavía no existe). Corre en modo simulación por defecto (no escribe
+    nada en la base) — hace falta `--aplicar` para que persista. Guarda un
+    reporte (`listas_proveedores/Reporte_Matching_Proveedores.xlsx`) con
+    cada fila y por qué método matcheó o si quedó sin match, para auditar
+    antes de confiar en el resultado a escala completa; admite
+    `--categoria`/`--subcategoria` para pilotear en un rubro chico primero
+    (ej. Frenos → Pastillas) antes de correrlo sobre un archivo con miles
+    de filas. **No probado contra listas de precios reales todavía** (no
+    hay ninguna en este repo, son datos del negocio fuera de control de
+    versiones) — sí probado de punta a punta con un Excel sintético de una
+    hoja: matcheó por descripción, dejó sin match lo que no correspondía,
+    creó el proveedor nuevo y generó bien el reporte.
+  - Probado de punta a punta contra una base de prueba (copia de la
+    demo): las 6 migraciones nuevas corren limpias, las 15 rutas
+    principales (incluida la tienda pública) responden 200 con sesión
+    iniciada, se creó un cliente mecánico, se le cargó un movimiento de
+    cuenta corriente (quedó `facturacion_estado='sin_configurar'`, igual
+    que con ventas sin `AFIPSDK_ACCESS_TOKEN`), se le aplicó una promoción
+    del 10% y una venta nueva a ese cliente aplicó el descuento
+    correctamente, dos ventas con el mismo `id_operacion` se contaron como
+    una sola operación en `/ventas/dia`, y un movimiento de stock sin
+    factura sumó el stock esperado.
 
 ## Estructura
 

@@ -1,0 +1,157 @@
+{% extends "base.html" %}
+{% block title %}Movimientos sin factura | Frenos & Embragues{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mb-0"><i class="bi bi-arrow-left-right"></i> Compras/ventas sin factura</h4>
+</div>
+<p class="text-muted">Para movimientos de stock que no pasan por una compra o venta formal (ni por AFIP). Impactan el mismo stock que todo lo demás.</p>
+
+<div class="card p-4 mb-4" style="max-width: 720px;">
+  <h6 class="mb-3">Nuevo movimiento</h6>
+  <form method="post" id="movForm">
+    <div class="row">
+      <div class="col-md-4 mb-3">
+        <label class="form-label">Tipo</label>
+        <select name="tipo" class="form-select">
+          <option value="compra">Compra (suma stock)</option>
+          <option value="venta">Venta (resta stock)</option>
+        </select>
+      </div>
+      <div class="col-md-4 mb-3">
+        <label class="form-label">Cantidad</label>
+        <input type="number" name="cantidad" min="1" class="form-control" required>
+      </div>
+      <div class="col-md-4 mb-3">
+        <label class="form-label">Precio (referencia)</label>
+        <input type="number" step="0.01" name="precio" class="form-control">
+      </div>
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Producto</label>
+      <div class="position-relative">
+        <input type="text" id="productoBuscar" class="form-control" autocomplete="off" required
+               placeholder="Buscar por nombre, código o marca...">
+        <input type="hidden" name="producto_id" id="productoId">
+        <div id="productoResultados" class="list-group position-absolute w-100 shadow" style="z-index: 1050; max-height: 260px; overflow-y: auto; display: none;"></div>
+      </div>
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Contraparte (proveedor o cliente, texto libre)</label>
+      <input type="text" name="contraparte" class="form-control">
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Observaciones</label>
+      <input type="text" name="observaciones" class="form-control">
+    </div>
+    <button type="submit" class="btn btn-primary">Registrar movimiento</button>
+  </form>
+</div>
+
+<div class="card p-3">
+  <h6 class="mb-3">Historial</h6>
+  <table class="table table-hover align-middle mb-0">
+    <thead>
+      <tr><th>Fecha</th><th>Tipo</th><th>Producto</th><th class="text-end">Cantidad</th><th class="text-end">Precio</th><th>Contraparte</th><th>Conciliado</th><th></th></tr>
+    </thead>
+    <tbody>
+    {% for m in movimientos %}
+      <tr>
+        <td>{{ m.fecha }}</td>
+        <td>
+          {% if m.tipo == 'compra' %}
+            <span class="badge bg-success">Compra</span>
+          {% else %}
+            <span class="badge bg-secondary">Venta</span>
+          {% endif %}
+        </td>
+        <td>{{ m.producto_nombre }} <span class="text-muted small">({{ m.producto_codigo or 's/código' }})</span></td>
+        <td class="text-end">{{ m.cantidad }}</td>
+        <td class="text-end">{{ m.precio|money }}</td>
+        <td>{{ m.contraparte or '' }} {% if m.observaciones %}<div class="text-muted small">{{ m.observaciones }}</div>{% endif %}</td>
+        <td>
+          {% if m.conciliado %}
+            <span class="badge bg-success">Sí</span>
+          {% else %}
+            <span class="badge bg-warning text-dark">No</span>
+          {% endif %}
+        </td>
+        <td class="text-end">
+          {% if m.conciliado %}
+            <form method="post" action="{{ url_for('stock_no_facturado_desconciliar', movimiento_id=m.id) }}">
+              <button class="btn btn-sm btn-outline-secondary">Desmarcar</button>
+            </form>
+          {% else %}
+            <form method="post" action="{{ url_for('stock_no_facturado_conciliar', movimiento_id=m.id) }}">
+              <button class="btn btn-sm btn-outline-success">Marcar conciliado</button>
+            </form>
+          {% endif %}
+        </td>
+      </tr>
+    {% else %}
+      <tr><td colspan="8" class="text-center text-muted py-4">No hay movimientos registrados todavía.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+  <div class="form-text mt-2">"Conciliado" es solo para marcar que ese movimiento después consiguió factura y se volvió a cargar como compra/venta normal — revisá a mano que no haya quedado duplicado el efecto sobre el stock.</div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+const PRODUCTOS = {{ productos_json|tojson }};
+const buscarInput = document.getElementById('productoBuscar');
+const idInput = document.getElementById('productoId');
+const resultados = document.getElementById('productoResultados');
+
+function ocultar() { resultados.style.display = 'none'; resultados.innerHTML = ''; }
+
+function mostrarResultados(lista) {
+  resultados.innerHTML = '';
+  if (lista.length === 0) {
+    const vacio = document.createElement('div');
+    vacio.className = 'list-group-item text-muted small';
+    vacio.textContent = 'No hay productos que coincidan.';
+    resultados.appendChild(vacio);
+    resultados.style.display = 'block';
+    return;
+  }
+  lista.slice(0, 8).forEach(function(p) {
+    const item = document.createElement('button');
+    item.type = 'button';
+    item.className = 'list-group-item list-group-item-action py-2';
+    item.innerHTML = '<div class="d-flex justify-content-between align-items-center">' +
+      '<span>' + p.nombre + ' <span class="text-muted small">(' + (p.codigo || 's/código') + (p.marca ? ' · ' + p.marca : '') + ')</span></span>' +
+      '<span class="text-muted small">stock: ' + p.stock_actual + '</span></div>';
+    item.addEventListener('mousedown', function(e) {
+      e.preventDefault();
+      idInput.value = p.id;
+      buscarInput.value = p.nombre + ' (' + (p.codigo || 's/código') + ')';
+      ocultar();
+    });
+    resultados.appendChild(item);
+  });
+  resultados.style.display = 'block';
+}
+
+buscarInput.addEventListener('input', function() {
+  idInput.value = '';
+  const q = buscarInput.value.trim().toLowerCase();
+  if (!q) { ocultar(); return; }
+  const filtrados = PRODUCTOS.filter(function(p) {
+    return (p.nombre + ' ' + p.codigo + ' ' + p.marca).toLowerCase().includes(q);
+  });
+  mostrarResultados(filtrados);
+});
+
+document.addEventListener('mousedown', function(e) {
+  if (!buscarInput.parentElement.contains(e.target)) ocultar();
+});
+
+document.getElementById('movForm').addEventListener('submit', function(e) {
+  if (buscarInput.value.trim() && !idInput.value) {
+    e.preventDefault();
+    alert('Elegí el producto de la lista que aparece al escribir (no alcanza con tipear el nombre).');
+  }
+});
+</script>
+{% endblock %}

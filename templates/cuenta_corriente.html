@@ -1,0 +1,109 @@
+{% extends "base.html" %}
+{% block title %}Cuenta corriente | {{ cliente.nombre }}{% endblock %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-3">
+  <h4 class="mb-0"><i class="bi bi-journal-text"></i> Cuenta corriente — {{ cliente.nombre }}</h4>
+  <a href="{{ url_for('clientes_lista') }}" class="btn btn-link">Volver a Clientes</a>
+</div>
+
+<div class="row g-3 mb-4">
+  <div class="col-md-3">
+    <div class="stat-card {{ 'stat-dark' if saldo > 0 else 'stat-gray' }}">
+      <div class="small">Saldo (debe)</div>
+      <h3>{{ saldo|money }}</h3>
+    </div>
+  </div>
+</div>
+
+<div class="card p-4 mb-4" style="max-width: 720px;">
+  <h6 class="mb-3">Nuevo movimiento</h6>
+  <form method="post" action="{{ url_for('cuenta_corriente_nueva', cliente_id=cliente.id) }}">
+    <div class="row">
+      <div class="col-md-4 mb-3">
+        <label class="form-label">Tipo</label>
+        <select name="tipo" class="form-select">
+          <option value="cargo">Cargo (compra a cuenta)</option>
+          <option value="pago">Pago (cancela deuda)</option>
+        </select>
+      </div>
+      <div class="col-md-4 mb-3">
+        <label class="form-label">Monto</label>
+        <input type="number" step="0.01" name="monto" class="form-control" required>
+      </div>
+      <div class="col-md-4 mb-3">
+        <label class="form-label">Producto (opcional)</label>
+        <select name="producto_id" class="form-select">
+          <option value="">-- Sin especificar --</option>
+          {% for p in productos_json %}
+            <option value="{{ p.id }}">{{ p.nombre }} ({{ p.codigo or 's/código' }})</option>
+          {% endfor %}
+        </select>
+      </div>
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Cliente / auto del tercero (referencia, opcional)</label>
+      <input type="text" name="cliente_tercero_nombre" class="form-control" placeholder="Ej: para el Renault Clio de Juan Pérez">
+      <div class="form-text">Es solo un dato de trazabilidad. La Factura C, si corresponde, siempre se emite a nombre de {{ cliente.nombre }}.</div>
+    </div>
+    <div class="mb-3">
+      <label class="form-label">Observaciones</label>
+      <input type="text" name="observaciones" class="form-control">
+    </div>
+    {% if not cliente.cuit_dni %}
+      <div class="alert alert-warning py-2">
+        <i class="bi bi-exclamation-triangle"></i> Este cliente no tiene CUIT/DNI cargado. Si el cargo supera
+        {{ umbral_identificacion|money }}, ARCA va a exigirlo — cargalo en la ficha del cliente antes de registrar ese movimiento.
+      </div>
+    {% endif %}
+    <button type="submit" class="btn btn-primary">Registrar movimiento</button>
+  </form>
+</div>
+
+<div class="card p-3">
+  <h6 class="mb-3">Historial</h6>
+  <table class="table table-hover align-middle mb-0">
+    <thead>
+      <tr><th>Fecha</th><th>Tipo</th><th>Producto</th><th>Referencia</th><th class="text-end">Monto</th><th>Factura C</th><th></th></tr>
+    </thead>
+    <tbody>
+    {% for m in movimientos %}
+      <tr>
+        <td>{{ m.fecha }}</td>
+        <td>
+          {% if m.tipo == 'cargo' %}
+            <span class="badge bg-secondary">Cargo</span>
+          {% else %}
+            <span class="badge bg-success">Pago</span>
+          {% endif %}
+        </td>
+        <td>{{ m.producto_nombre or '' }}</td>
+        <td>{{ m.cliente_tercero_nombre or '' }} {% if m.observaciones %}<div class="text-muted small">{{ m.observaciones }}</div>{% endif %}</td>
+        <td class="text-end">{{ m.monto|money }}</td>
+        <td>
+          {% if m.tipo == 'cargo' %}
+            {% if m.facturacion_estado == 'emitida' %}
+              <span class="badge bg-success">CAE {{ m.cae }}</span>
+            {% elif m.facturacion_estado == 'sin_configurar' %}
+              <span class="badge bg-warning text-dark">Sin configurar</span>
+            {% elif m.facturacion_estado == 'error' %}
+              <span class="badge bg-danger" title="{{ m.facturacion_error }}">Error</span>
+            {% else %}
+              <span class="text-muted small">—</span>
+            {% endif %}
+          {% endif %}
+        </td>
+        <td class="text-end">
+          {% if m.tipo == 'cargo' and m.facturacion_estado != 'emitida' %}
+            <form method="post" action="{{ url_for('cuenta_corriente_facturar', cliente_id=cliente.id, movimiento_id=m.id) }}" class="d-inline">
+              <button class="btn btn-sm btn-outline-primary">Reintentar facturación</button>
+            </form>
+          {% endif %}
+        </td>
+      </tr>
+    {% else %}
+      <tr><td colspan="7" class="text-center text-muted py-4">Todavía no hay movimientos en esta cuenta corriente.</td></tr>
+    {% endfor %}
+    </tbody>
+  </table>
+</div>
+{% endblock %}
