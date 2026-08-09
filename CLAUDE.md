@@ -494,14 +494,20 @@ Agregado después:
   respetando los patrones ya existentes (migraciones idempotentes, alta
   rápida vía modal + `/api/...-nuevo`, módulos externos que nunca lanzan
   excepción):
-  - **Filtro Categoría→Subcategoría→Marca en `/productos`**: filtros GET
-    (`categoria`, `subcategoria`, `marca`) combinables con el buscador de
-    texto ya existente. El desplegable de subcategoría se repuebla en
-    cascada con el mismo JSON (`subcategorias_por_categoria_json()`) que ya
-    usaban la ficha de producto y el buscador de compras. El filtro de
-    marca es un `<input>` con `<datalist>` (no un desplegable fijo) y
-    también busca coincidencias en el nombre del producto, para no
-    depender de que `marca` esté siempre cargada como campo separado.
+  - **Filtro Categoría→Subcategoría→Modelo de auto en `/productos`**:
+    filtros GET (`categoria`, `subcategoria`, `modelo`) combinables con el
+    buscador de texto ya existente. El desplegable de subcategoría se
+    repuebla en cascada con el mismo JSON
+    (`subcategorias_por_categoria_json()`) que ya usaban la ficha de
+    producto y el buscador de compras. El filtro de modelo es un
+    `<input>` con `<datalist>` (no un desplegable fijo) que busca
+    coincidencia parcial contra `productos.modelo_compatible` — así
+    "Gol" encuentra un producto cargado como "VW Gol / Voyage" sin exigir
+    el campo completo (mismo criterio de coincidencia parcial que ya usa
+    el filtro de auto/modelo del catálogo público de la tienda). Primer
+    intento de este filtro fue por marca en vez de modelo; se corrigió a
+    pedido de Celes porque lo que se necesita es encontrar todo lo
+    compatible con un auto puntual, no filtrar por fabricante del repuesto.
   - **Ventas del día por medio de pago** (`/ventas/dia`, link nuevo desde
     `/ventas`): resumen agrupado por `metodo_pago` con cantidad y total,
     más el detalle de cada venta del día. Para pagos mixtos (parte
