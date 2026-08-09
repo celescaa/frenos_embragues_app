@@ -607,6 +607,27 @@ Agregado después:
       desde cada cuenta corriente), top 5 por saldo pendiente
       (`SUM(cargos) - SUM(pagos)`) entre los clientes con movimientos
       cargados.
+    - **Cuenta corriente disponible para cualquier cliente + saldo visible
+      en la lista (09/08/2026)**: la restricción original de arriba (ícono
+      hacia `/clientes/<id>/cuenta-corriente` visible "solo para clientes
+      tipo mecánico") era una limitación artificial de la interfaz, no del
+      backend — las rutas (`cuenta_corriente_ver`, `cuenta_corriente_nueva`,
+      `/clientes/top-deudores`) ya eran genéricas y nunca filtraron por
+      `tipo_cliente`. Se sacó ese gate solo en `templates/clientes.html`: el
+      ícono ahora se muestra para cualquier cliente. `tipo_cliente`
+      (`particular`/`mecanico`) se mantiene, pero pasa a ser puramente
+      informativo (una etiqueta/badge), ya no condiciona nada funcional. El
+      motivo es de negocio: un cliente particular también puede terminar
+      debiendo plata, no es exclusivo de los mecánicos. Se sumó además una
+      columna "Saldo" a `/clientes` (`core/app.py`, función
+      `clientes_lista()`), calculada con el mismo criterio que ya usaba
+      `/clientes/top-deudores` (`SUM(cargos) - SUM(pagos)` vía
+      `LEFT JOIN cuenta_corriente_movimientos` + `GROUP BY`) en vez de
+      duplicar esa lógica con una regla distinta. La celda solo muestra un
+      monto (en rojo) cuando el cliente debe de verdad (`saldo > 0`); queda
+      vacía si nunca tuvo movimientos, está saldado o tiene saldo a favor.
+      Decisión documentada en
+      `docs/superpowers/specs/2026-08-09-cuenta-corriente-todos-los-clientes-design.md`.
   - **Ranking de clientes + descuentos aprobados** (`/clientes/top`, link
     nuevo desde `/clientes`): mismo cálculo de top 5 que ya tenía el panel
     de analítica, pero con período elegible (30/90/365 días o histórico) y

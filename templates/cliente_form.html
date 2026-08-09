@@ -41,9 +41,9 @@
       <label class="form-label">Tipo de cliente</label>
       <select name="tipo_cliente" class="form-select">
         <option value="particular" {{ 'selected' if not cliente or cliente.tipo_cliente == 'particular' else '' }}>Particular</option>
-        <option value="mecanico" {{ 'selected' if cliente and cliente.tipo_cliente == 'mecanico' else '' }}>Mecánico (compra a cuenta corriente)</option>
+        <option value="mecanico" {{ 'selected' if cliente and cliente.tipo_cliente == 'mecanico' else '' }}>Mecánico / taller</option>
       </select>
-      <div class="form-text">Un cliente "Mecánico" habilita la pantalla de cuenta corriente para cargarle deuda y registrar pagos.</div>
+      <div class="form-text">Solo a fines informativos — cualquier cliente, sea "Particular" o "Mecánico / taller", puede tener cuenta corriente.</div>
     </div>
     <button type="submit" class="btn btn-primary">Guardar</button>
     <a href="{{ url_for('clientes_lista') }}" class="btn btn-link">Cancelar</a>
