@@ -61,6 +61,7 @@
         <td>{{ p.aprobado_por or '' }}</td>
         <td class="text-end">
           <form method="post" action="{{ url_for('promocion_finalizar', promocion_id=p.id) }}" onsubmit="return confirm('¿Finalizar esta promoción ahora?');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <button class="btn btn-sm btn-outline-danger">Finalizar</button>
           </form>
         </td>
@@ -77,6 +78,7 @@
   <div class="modal-dialog">
     <div class="modal-content">
       <form method="post" id="formPromocion">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <div class="modal-header">
           <h5 class="modal-title"><i class="bi bi-tag"></i> Aplicar promoción a <span id="promoClienteNombre"></span></h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
