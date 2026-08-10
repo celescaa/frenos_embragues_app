@@ -11,6 +11,8 @@ import os
 import secrets
 import sqlite3
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, session
+from flask_wtf import CSRFProtect
+from flask_wtf.csrf import CSRFError
 from datetime import datetime, timedelta
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
@@ -49,11 +51,18 @@ else:
     with open(_SECRET_KEY_PATH, "w") as _f:
         _f.write(app.secret_key)
 
+csrf = CSRFProtect(app)
+
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(hours=12)
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 # Cuando el sistema quede accesible por HTTPS (hosting), sumar:
 # app.config["SESSION_COOKIE_SECURE"] = True
+
+@app.errorhandler(CSRFError)
+def manejar_csrf_error(e):
+    flash("La página quedó desactualizada. Volvé a intentarlo.", "warning")
+    return redirect(request.referrer or url_for("dashboard"))
 
 LOCKOUT_INTENTOS = 5
 LOCKOUT_MINUTOS = 15
@@ -2328,6 +2337,7 @@ def tienda_pedido_fallo(pedido_id):
     return render_template("tienda_pedido_estado.html", pedido=pedido, resultado="fallo")
 
 
+@csrf.exempt
 @app.route("/webhooks/mercadopago", methods=["POST"])
 def webhook_mercadopago():
     """Notificación de Mercado Pago. Es la ÚNICA fuente de verdad del pago
