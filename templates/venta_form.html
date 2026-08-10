@@ -252,7 +252,11 @@ document.getElementById('btnGuardarCliente').addEventListener('click', function(
   datos.append('direccion', document.getElementById('ncDireccion').value.trim());
   datos.append('cuit_dni', document.getElementById('ncCuitDni').value.trim());
 
-  fetch('/api/clientes-nuevo', { method: 'POST', body: datos })
+  fetch('/api/clientes-nuevo', {
+    method: 'POST',
+    headers: { 'X-CSRFToken': document.querySelector('meta[name="csrf-token"]').content },
+    body: datos,
+  })
     .then(function(r) { return r.json(); })
     .then(function(data) {
       if (!data.ok) {
