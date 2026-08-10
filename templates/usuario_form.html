@@ -4,6 +4,7 @@
 <h4 class="mb-3">{{ 'Editar usuario' if usuario else 'Nuevo usuario' }}</h4>
 <div class="card p-4" style="max-width: 560px;">
   <form method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     {% if not usuario %}
       <div class="mb-3">
         <label class="form-label">Usuario (para iniciar sesión) *</label>
