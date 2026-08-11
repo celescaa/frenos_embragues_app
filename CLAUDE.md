@@ -1003,7 +1003,14 @@ Pendiente, en orden de cuándo se vuelve necesario:
    error de "página desactualizada" de CSRF en cada envío, algo que hoy no
    pasa porque el sistema corre por HTTP local. No es algo para resolver
    ahora, solo una alerta a tener en cuenta junto con el resto de los
-   puntos de HTTPS de este ítem.
+   puntos de HTTPS de este ítem. Otro gotcha para ese momento: el chequeo
+   de mismo origen que usa `manejar_csrf_error` (el handler de errores
+   CSRF, en `core/app.py`) compara contra `request.host`, que sale del
+   header `Host` de la request — si el hosting elegido pone el sistema
+   detrás de un reverse proxy sin configurar `ProxyFix` o una lista de
+   hosts de confianza, ese header se puede falsificar. No aplica hoy
+   (corre local, sin proxy), pero conviene revisarlo al elegir el hosting
+   definitivo (punto 8 del roadmap).
 4. **2FA**: no es prioritario mientras el sistema corra solo en la compu del
    local. Se vuelve razonable sumarlo cuando quede expuesto a internet.
    Técnicamente sencillo de agregar (`pyotp` + un campo de código de un
