@@ -84,6 +84,7 @@
       <div class="mt-auto">
         <div class="fs-5 fw-bold mb-2">{{ p.precio_venta|money }}</div>
         <form method="post" action="{{ url_for('tienda_carrito_agregar') }}" class="d-flex gap-2">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <input type="hidden" name="producto_id" value="{{ p.id }}">
           <input type="number" name="cantidad" value="1" min="1" max="{{ p.stock_actual }}" class="form-control" style="width: 80px;">
           <button type="submit" class="btn btn-primary flex-grow-1"><i class="bi bi-cart-plus"></i> Agregar</button>

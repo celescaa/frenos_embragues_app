@@ -15,6 +15,7 @@
         </div>
       {% endif %}
       <form method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <div class="mb-3">
           <label class="form-label">Nombre y apellido *</label>
           <input type="text" name="nombre" class="form-control" required>
