@@ -8,6 +8,7 @@
     <button class="btn btn-outline-secondary" onclick="window.print()"><i class="bi bi-printer"></i> Imprimir / Guardar PDF</button>
     {% if venta.cliente_email %}
       <form method="post" action="{{ url_for('ventas_enviar_mail', venta_id=venta.id) }}" class="d-inline">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <button type="submit" class="btn btn-outline-secondary"><i class="bi bi-envelope"></i> Enviar por mail</button>
       </form>
     {% else %}
@@ -36,6 +37,7 @@
       {% endif %}
     </div>
     <form method="post" action="{{ url_for('ventas_facturar', venta_id=venta.id) }}" class="m-0">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <button type="submit" class="btn btn-sm btn-outline-dark"><i class="bi bi-arrow-clockwise"></i> Reintentar facturación</button>
     </form>
   </div>
