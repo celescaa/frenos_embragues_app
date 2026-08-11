@@ -9,6 +9,7 @@
 <div class="card p-4 mb-4" style="max-width: 720px;">
   <h6 class="mb-3">Nuevo movimiento</h6>
   <form method="post" id="movForm">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div class="row">
       <div class="col-md-4 mb-3">
         <label class="form-label">Tipo</label>
@@ -78,10 +79,12 @@
         <td class="text-end">
           {% if m.conciliado %}
             <form method="post" action="{{ url_for('stock_no_facturado_desconciliar', movimiento_id=m.id) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <button class="btn btn-sm btn-outline-secondary">Desmarcar</button>
             </form>
           {% else %}
             <form method="post" action="{{ url_for('stock_no_facturado_conciliar', movimiento_id=m.id) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <button class="btn btn-sm btn-outline-success">Marcar conciliado</button>
             </form>
           {% endif %}
