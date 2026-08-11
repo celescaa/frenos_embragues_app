@@ -973,6 +973,10 @@ Ya resuelto:
   Login y usuarios más arriba).
 - `app.secret_key` generada al azar y guardada fuera del código
   (`.secret_key`).
+- Protección CSRF (`Flask-WTF`) en todos los formularios y en los 3
+  `fetch()` de alta rápida (clientes/productos), con excepción del webhook
+  de Mercado Pago (server-to-server, no lleva sesión de navegador). Errores
+  de token muestran un mensaje en español en vez de una página técnica.
 
 Pendiente, en orden de cuándo se vuelve necesario:
 
@@ -991,8 +995,7 @@ Pendiente, en orden de cuándo se vuelve necesario:
    la tienda online está lista — Mercado Pago necesita webhooks públicos):
    HTTPS vía el hosting, activar `SESSION_COOKIE_SECURE`, límite de
    intentos de login (ya está, pero revisar que siga siendo suficiente con
-   tráfico público), protección CSRF en los formularios, nunca correr Flask
-   con `debug=True` en producción.
+   tráfico público), nunca correr Flask con `debug=True` en producción.
 4. **2FA**: no es prioritario mientras el sistema corra solo en la compu del
    local. Se vuelve razonable sumarlo cuando quede expuesto a internet.
    Técnicamente sencillo de agregar (`pyotp` + un campo de código de un
