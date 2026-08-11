@@ -17,6 +17,7 @@
 </div>
 
 <form method="post" action="{{ url_for('compras_nueva') }}" id="compraForm">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   <div class="card p-4 mb-3">
     <div class="row">
       <div class="col-md-6 mb-3">
@@ -400,7 +401,11 @@ document.getElementById('btnGuardarProducto').addEventListener('click', function
     datos.append('proveedor_id', proveedorSelect.value);
   }
 
-  fetch('/api/productos-nuevo', { method: 'POST', body: datos })
+  fetch('/api/productos-nuevo', {
+    method: 'POST',
+    headers: { 'X-CSRFToken': document.querySelector('meta[name="csrf-token"]').content },
+    body: datos,
+  })
     .then(function(r) { return r.json(); })
     .then(function(data) {
       if (!data.ok) {

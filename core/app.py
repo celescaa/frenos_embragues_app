@@ -11,10 +11,13 @@ import os
 import secrets
 import sqlite3
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, session
+from flask_wtf import CSRFProtect
+from flask_wtf.csrf import CSRFError
 from datetime import datetime, timedelta
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 from dotenv import load_dotenv
+from urllib.parse import urlparse
 from . import database as db
 from . import facturacion_afip
 from . import tienda_pagos
@@ -49,11 +52,35 @@ else:
     with open(_SECRET_KEY_PATH, "w") as _f:
         _f.write(app.secret_key)
 
+csrf = CSRFProtect(app)
+# El default de Flask-WTF (WTF_CSRF_TIME_LIMIT = 3600s = 1 hora) es mucho más
+# corto que la sesión de este sistema (12hs, ver PERMANENT_SESSION_LIFETIME
+# abajo). En pantallas donde un formulario puede quedar abierto un rato largo
+# (revisión de factura importada, carga de una venta con muchos productos),
+# eso rompía con un "página desactualizada" antes de que la sesión expirara
+# de verdad. None hace que la validez del token siga la duración de la
+# sesión en vez de un límite fijo aparte — no debilita la protección (el
+# token sigue atado a la sesión y firmado), solo saca ese límite arbitrario.
+app.config["WTF_CSRF_TIME_LIMIT"] = None
+
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(hours=12)
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 # Cuando el sistema quede accesible por HTTPS (hosting), sumar:
 # app.config["SESSION_COOKIE_SECURE"] = True
+
+@app.errorhandler(CSRFError)
+def manejar_csrf_error(e):
+    flash("La página quedó desactualizada. Volvé a intentarlo.", "warning")
+    # request.referrer lo controla quien hace el request: no redirigir ahí
+    # sin validar (open redirect) — solo se honra si es del mismo origen.
+    # Sin referrer válido, caer a la tienda pública si la ruta era /tienda
+    # (un cliente anónimo no tiene por qué terminar en el panel de admin,
+    # que lo rebota a /login) y al dashboard en cualquier otro caso.
+    destino = request.referrer
+    if not destino or urlparse(destino).netloc != request.host:
+        destino = url_for("tienda_catalogo") if request.path.startswith("/tienda") else url_for("dashboard")
+    return redirect(destino)
 
 LOCKOUT_INTENTOS = 5
 LOCKOUT_MINUTOS = 15
@@ -2328,6 +2355,7 @@ def tienda_pedido_fallo(pedido_id):
     return render_template("tienda_pedido_estado.html", pedido=pedido, resultado="fallo")
 
 
+@csrf.exempt
 @app.route("/webhooks/mercadopago", methods=["POST"])
 def webhook_mercadopago():
     """Notificación de Mercado Pago. Es la ÚNICA fuente de verdad del pago

@@ -7,6 +7,7 @@
 
 <div class="card p-3 mb-3">
   <form method="post" action="{{ url_for('categorias_nueva') }}" class="row g-2 align-items-end">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div class="col-auto flex-grow-1">
       <label class="form-label mb-1">Nueva categoría</label>
       <input type="text" name="nombre" class="form-control" placeholder="Ej: Rótulas" required>
@@ -46,14 +47,17 @@
       <div>
         {% if c.activo %}
           <form method="post" action="{{ url_for('categorias_desactivar', categoria_id=c.id, todas=1 if mostrar_todas else None) }}" class="d-inline">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <button class="btn btn-sm btn-outline-warning" title="Desactivar (no se va a poder elegir en productos nuevos, pero no borra lo ya cargado)"><i class="bi bi-slash-circle"></i></button>
           </form>
         {% else %}
           <form method="post" action="{{ url_for('categorias_activar', categoria_id=c.id, todas=1 if mostrar_todas else None) }}" class="d-inline">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <button class="btn btn-sm btn-outline-success" title="Activar"><i class="bi bi-check-circle"></i></button>
           </form>
         {% endif %}
         <form method="post" action="{{ url_for('categorias_eliminar', categoria_id=c.id) }}" class="d-inline" onsubmit="return confirm('¿Eliminar esta categoría? Si tiene productos cargados no se va a poder — mejor desactivala.');">
+          <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
           <button class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>
         </form>
       </div>
@@ -78,14 +82,17 @@
             <td class="text-end">
               {% if s.activo %}
                 <form method="post" action="{{ url_for('subcategorias_desactivar', subcategoria_id=s.id, todas=1 if mostrar_todas else None) }}" class="d-inline">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                   <button class="btn btn-sm btn-outline-warning" title="Desactivar"><i class="bi bi-slash-circle"></i></button>
                 </form>
               {% else %}
                 <form method="post" action="{{ url_for('subcategorias_activar', subcategoria_id=s.id, todas=1 if mostrar_todas else None) }}" class="d-inline">
+                  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                   <button class="btn btn-sm btn-outline-success" title="Activar"><i class="bi bi-check-circle"></i></button>
                 </form>
               {% endif %}
               <form method="post" action="{{ url_for('subcategorias_eliminar', subcategoria_id=s.id) }}" class="d-inline" onsubmit="return confirm('¿Eliminar esta subcategoría? Si tiene productos cargados no se va a poder.');">
+                <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
                 <button class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>
               </form>
             </td>
@@ -96,6 +103,7 @@
     {% endif %}
 
     <form method="post" action="{{ url_for('subcategorias_nueva', categoria_id=c.id) }}" class="row g-2 align-items-end mt-1">
+      <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
       <div class="col-auto flex-grow-1">
         <input type="text" name="nombre" class="form-control form-control-sm" placeholder="Nueva subcategoría para {{ c.nombre }}" required>
       </div>

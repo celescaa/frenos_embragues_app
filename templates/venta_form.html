@@ -4,6 +4,7 @@
 <h4 class="mb-3"><i class="bi bi-cash-coin"></i> Nueva venta</h4>
 
 <form method="post" id="ventaForm">
+  <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
   <div class="card p-4 mb-3">
     <div class="row">
       <div class="col-md-5 mb-3">
@@ -252,7 +253,11 @@ document.getElementById('btnGuardarCliente').addEventListener('click', function(
   datos.append('direccion', document.getElementById('ncDireccion').value.trim());
   datos.append('cuit_dni', document.getElementById('ncCuitDni').value.trim());
 
-  fetch('/api/clientes-nuevo', { method: 'POST', body: datos })
+  fetch('/api/clientes-nuevo', {
+    method: 'POST',
+    headers: { 'X-CSRFToken': document.querySelector('meta[name="csrf-token"]').content },
+    body: datos,
+  })
     .then(function(r) { return r.json(); })
     .then(function(data) {
       if (!data.ok) {

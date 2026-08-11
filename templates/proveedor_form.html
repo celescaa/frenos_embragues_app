@@ -4,6 +4,7 @@
 <h4 class="mb-3">{{ 'Editar proveedor' if proveedor else 'Nuevo proveedor' }}</h4>
 <div class="card p-4" style="max-width: 640px;">
   <form method="post">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div class="mb-3">
       <label class="form-label">Nombre / Razón social *</label>
       <input type="text" name="nombre" class="form-control" required value="{{ proveedor.nombre if proveedor else '' }}">

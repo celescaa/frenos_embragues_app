@@ -19,6 +19,7 @@
           <td class="text-end">{{ it.precio_unitario|money }}</td>
           <td>
             <form method="post" action="{{ url_for('tienda_carrito_actualizar') }}" class="d-flex gap-1">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <input type="hidden" name="producto_id" value="{{ it.producto_id }}">
               <input type="number" name="cantidad" value="{{ it.cantidad }}" min="1" max="{{ it.stock_actual }}" class="form-control form-control-sm" onchange="this.form.submit()">
             </form>
@@ -26,6 +27,7 @@
           <td class="text-end">{{ it.subtotal|money }}</td>
           <td class="text-end">
             <form method="post" action="{{ url_for('tienda_carrito_quitar') }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <input type="hidden" name="producto_id" value="{{ it.producto_id }}">
               <button type="submit" class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>
             </form>

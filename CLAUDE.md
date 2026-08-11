@@ -973,6 +973,10 @@ Ya resuelto:
   Login y usuarios más arriba).
 - `app.secret_key` generada al azar y guardada fuera del código
   (`.secret_key`).
+- Protección CSRF (`Flask-WTF`) en todos los formularios y en los 3
+  `fetch()` de alta rápida (clientes/productos), con excepción del webhook
+  de Mercado Pago (server-to-server, no lleva sesión de navegador). Errores
+  de token muestran un mensaje en español en vez de una página técnica.
 
 Pendiente, en orden de cuándo se vuelve necesario:
 
@@ -991,8 +995,22 @@ Pendiente, en orden de cuándo se vuelve necesario:
    la tienda online está lista — Mercado Pago necesita webhooks públicos):
    HTTPS vía el hosting, activar `SESSION_COOKIE_SECURE`, límite de
    intentos de login (ya está, pero revisar que siga siendo suficiente con
-   tráfico público), protección CSRF en los formularios, nunca correr Flask
-   con `debug=True` en producción.
+   tráfico público), nunca correr Flask con `debug=True` en producción.
+   Gotcha ya anotado para cuando llegue ese momento: con HTTPS activo,
+   `WTF_CSRF_SSL_STRICT` de Flask-WTF (default `True`) va a exigir además un
+   header `Referer` del mismo origen en cada POST — un cliente que lo
+   suprima (por ejemplo con `Referrer-Policy: no-referrer`) va a ver el
+   error de "página desactualizada" de CSRF en cada envío, algo que hoy no
+   pasa porque el sistema corre por HTTP local. No es algo para resolver
+   ahora, solo una alerta a tener en cuenta junto con el resto de los
+   puntos de HTTPS de este ítem. Otro gotcha para ese momento: el chequeo
+   de mismo origen que usa `manejar_csrf_error` (el handler de errores
+   CSRF, en `core/app.py`) compara contra `request.host`, que sale del
+   header `Host` de la request — si el hosting elegido pone el sistema
+   detrás de un reverse proxy sin configurar `ProxyFix` o una lista de
+   hosts de confianza, ese header se puede falsificar. No aplica hoy
+   (corre local, sin proxy), pero conviene revisarlo al elegir el hosting
+   definitivo (punto 8 del roadmap).
 4. **2FA**: no es prioritario mientras el sistema corra solo en la compu del
    local. Se vuelve razonable sumarlo cuando quede expuesto a internet.
    Técnicamente sencillo de agregar (`pyotp` + un campo de código de un
