@@ -89,15 +89,15 @@ Arrancar la app (`python app.py`) y con la app corriendo, en otra terminal:
 
 ```bash
 # 1. Sin sesión ni token: un POST a una ruta protegida por login debería
-#    redirigir a /login (comportamiento de @app.before_request, sin cambios).
+#    terminar en /login (ver nota abajo sobre el paso intermedio por el
+#    handler de CSRFError).
 curl -i -X POST http://127.0.0.1:5050/clientes/1/eliminar
 
-# 2. El webhook sigue aceptando POST sin token CSRF (está exento) — debe
-#    responder 401 (firma inválida, esperado sin MERCADOPAGO_WEBHOOK_SECRET
-#    real) y NO un error de CSRF.
+# 2. El webhook sigue aceptando POST sin token CSRF (está exento) — no debe
+#    devolver un error de CSRF.
 curl -i -X POST http://127.0.0.1:5050/webhooks/mercadopago -H "Content-Type: application/json" -d '{"type":"payment","data":{"id":"123"}}'
 ```
-Expected: la primera responde 302 a `/login` (no cambió). La segunda responde 401 con `{"error": "firma inválida"}` — si en cambio devolviera una redirección con el flash de CSRF, la exención no quedó bien aplicada.
+Expected: la primera responde 302, pero no directo a `/login` como antes de la corrección del open redirect en `manejar_csrf_error` (revisión final, 11/08/2026): un POST anónimo sin token CSRF entra primero al handler de `CSRFError` (registrado antes que la verificación de sesión), que ahora redirige solo a un destino del mismo origen — sin `Referer` válido, cae a `/` (dashboard) — y recién en ese segundo hop `@app.before_request` detecta que no hay sesión y manda a `/login`. Es decir, dos saltos (`/clientes/1/eliminar` → `/` → `/login`), no uno directo. La segunda responde 200, no 401: sin `MERCADOPAGO_WEBHOOK_SECRET` configurado, `tienda_pagos.validar_firma_webhook()` devuelve `(True, "sin validar")` a propósito (mismo criterio defensivo del resto de la app — no bloquea por falta de configuración) y el webhook acepta la notificación en vez de rechazarla; lo que importa verificar acá es que la respuesta NO sea una redirección con el flash de CSRF, que sí confirmaría que la exención no quedó bien aplicada.
 
 - [ ] **Step 7: Commit**
 
