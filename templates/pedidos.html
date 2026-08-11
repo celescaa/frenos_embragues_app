@@ -38,6 +38,7 @@
       </div>
 
       <form method="post" action="{{ url_for('pedidos_marcar') }}">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
         <table class="table table-sm align-middle mb-2">
           <thead>
             <tr>
@@ -102,6 +103,7 @@
           <td class="text-muted">{{ p.fecha_pedido_pendiente }}</td>
           <td class="text-end">
             <form method="post" action="{{ url_for('pedidos_desmarcar', producto_id=p.id) }}">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <button class="btn btn-sm btn-outline-secondary" title="Sacar la marca (vuelve a la lista de faltantes si sigue bajo el mínimo)">
                 <i class="bi bi-x-lg"></i> Desmarcar
               </button>

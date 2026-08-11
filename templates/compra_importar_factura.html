@@ -10,6 +10,7 @@
     línea antes de confirmar — nada se carga al stock hasta que apretás "Registrar compra".
   </p>
   <form method="post" enctype="multipart/form-data">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <div class="mb-3">
       <label class="form-label">Archivo de la factura</label>
       <input type="file" name="factura" class="form-control" accept=".pdf,.xlsx,.xls,.csv" required>

@@ -36,14 +36,17 @@
           <a href="{{ url_for('proveedores_editar', proveedor_id=p.id) }}" class="btn btn-sm btn-outline-secondary"><i class="bi bi-pencil"></i></a>
           {% if p.activo %}
             <form method="post" action="{{ url_for('proveedores_desactivar', proveedor_id=p.id, todos=1 if mostrar_todos else None) }}" class="d-inline">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <button class="btn btn-sm btn-outline-warning" title="Desactivar (no se puede elegir para nada nuevo, pero no borra lo ya cargado)"><i class="bi bi-slash-circle"></i></button>
             </form>
           {% else %}
             <form method="post" action="{{ url_for('proveedores_activar', proveedor_id=p.id, todos=1 if mostrar_todos else None) }}" class="d-inline">
+              <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <button class="btn btn-sm btn-outline-success" title="Activar"><i class="bi bi-check-circle"></i></button>
             </form>
           {% endif %}
           <form method="post" action="{{ url_for('proveedores_eliminar', proveedor_id=p.id) }}" class="d-inline" onsubmit="return confirm('¿Eliminar este proveedor? Si tiene productos, compras o cotizaciones cargadas no se va a poder — mejor desactivalo.');">
+            <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <button class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></button>
           </form>
         </td>
