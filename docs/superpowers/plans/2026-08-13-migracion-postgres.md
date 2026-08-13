@@ -49,7 +49,7 @@ Estas reglas aplican a **todas** las tareas de port de consultas. No se repiten 
 | `tests/test_<area>.py` | Un archivo por área portada | Crear (Tareas 4-10) |
 | `core/database.py` | Conexión + helpers de lectura | Modificar (Tareas 3-4) |
 | `core/app.py` | 146 consultas + rutas | Modificar (Tarea 4: quita 2 llamadas a `init_db()`/`seed_admin_user()`; Tareas 5-9, 11: el resto) |
-| `scripts/*.py` (4 scripts) | Quitar la llamada a `db.init_db()`, ya innecesaria | Modificar (Tarea 4) |
+| `scripts/*.py` (4 scripts) | Tarea 4: quitar la llamada a `db.init_db()`. Tarea 11: portar sus ~101 consultas | Modificar (Tareas 4, 11) |
 | `core/facturacion_afip.py` | 6 consultas | Modificar (Tarea 10) |
 | `core/tienda_pagos.py` | 3 consultas | Modificar (Tarea 10) |
 | `core/importar_factura.py` | 2 consultas | Modificar (Tarea 10) |
@@ -1287,7 +1287,125 @@ de ARCA y Mercado Pago."
 
 ---
 
-### Tarea 11: Verificación integral y limpieza
+### Tarea 11: Portar los scripts de línea de comandos
+
+Los 3 scripts que hablan con la base quedaron con dialecto SQLite y hoy
+fallarían contra Postgres. Pesa más de lo que parece: `importar_datos.py` es
+la herramienta con la que se cargan los datos reales del negocio — si queda
+rota, el sistema migrado no se puede poblar.
+
+**Archivos:**
+- Modificar: `scripts/importar_datos.py` (66 placeholders), `scripts/cargar_stock_por_proveedor.py` (27), `scripts/matchear_productos_proveedores.py` (8), `scripts/generar_planilla_stock_proveedores.py` (`activo=1`)
+- Crear: `tests/test_scripts.py`
+
+**Interfaces:**
+- Consume: `db.get_connection()`, `db.obtener_categorias(conn=None, solo_activas=True) -> list[str]`, `db.CATEGORIAS_RENOMBRADAS`.
+- Produce: nada nuevo. Los scripts conservan su interfaz de línea de comandos exactamente igual (mismos argumentos, mismo `--reemplazar`, mismos mensajes).
+
+- [ ] **Paso 1: Escribir los tests que fallan**
+
+Crear `tests/test_scripts.py`:
+
+```python
+"""Los scripts se corren a mano de vez en cuando, así que nadie se entera de
+que están rotos hasta que se los necesita — justo el día que hay que cargar
+los datos reales. Estos tests ejercitan sus funciones de base contra Postgres."""
+import sys
+from decimal import Decimal
+from pathlib import Path
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+
+
+def test_obtener_o_crear_proveedor_devuelve_id(db_conn):
+    """Usaba cur.lastrowid, que en psycopg no existe: tiene que venir de
+    RETURNING id."""
+    from scripts.cargar_stock_por_proveedor import obtener_o_crear_proveedor
+
+    id_nuevo = obtener_o_crear_proveedor(db_conn, "Proveedor Recién Creado")
+    assert isinstance(id_nuevo, int) and id_nuevo > 0
+
+    id_repetido = obtener_o_crear_proveedor(db_conn, "Proveedor Recién Creado")
+    assert id_repetido == id_nuevo, "no debe duplicar un proveedor que ya existe"
+
+
+def test_la_planilla_lista_solo_proveedores_activos(db_conn):
+    """activo=1 no funciona contra una columna BOOLEAN de Postgres."""
+    db_conn.execute("INSERT INTO proveedores (nombre, activo) VALUES ('Vigente SRL', true)")
+    db_conn.execute("INSERT INTO proveedores (nombre, activo) VALUES ('Ya no se usa SA', false)")
+    nombres = [
+        f["nombre"]
+        for f in db_conn.execute(
+            "SELECT nombre FROM proveedores WHERE activo IS TRUE"
+        ).fetchall()
+    ]
+    assert "Vigente SRL" in nombres
+    assert "Ya no se usa SA" not in nombres
+
+
+def test_importar_datos_carga_un_producto_con_precio_exacto(db_conn):
+    """El importador escribe plata: tiene que llegar como Decimal exacto."""
+    db_conn.execute(
+        """INSERT INTO productos (nombre, categoria, precio_costo, precio_venta)
+           VALUES ('Importado', 'Frenos', %s, %s)""",
+        (Decimal("12500.50"), Decimal("16250.65")),
+    )
+    fila = db_conn.execute(
+        "SELECT precio_costo, precio_venta FROM productos WHERE nombre = 'Importado'"
+    ).fetchone()
+    assert fila["precio_costo"] == Decimal("12500.50")
+    assert fila["precio_venta"] == Decimal("16250.65")
+```
+
+- [ ] **Paso 2: Verificar que fallan**
+
+```bash
+python -m pytest tests/test_scripts.py -v
+```
+
+- [ ] **Paso 3: Portar los 4 scripts**
+
+Aplicando las restricciones globales. Atención a:
+
+- Los ~101 `?` pasan a `%s` en los 3 scripts que consultan la base.
+- Todos los `cur.lastrowid` pasan a `INSERT ... RETURNING id` + `.fetchone()["id"]`.
+- `scripts/generar_planilla_stock_proveedores.py:92` — `WHERE activo=1` pasa a `WHERE activo IS TRUE`.
+- **Las fechas ya no son texto.** `importar_datos.py` parsea varios formatos de fecha y hoy los normaliza a la cadena `YYYY-MM-DD`; ahora tiene que entregar un `datetime.date` (las columnas son `DATE`). Su tolerancia a formatos de entrada no cambia, solo el tipo que produce.
+- **La plata ya no es float.** `importar_datos.py` tolera el formato argentino (`12.500,50`); el valor resultante pasa a construirse como `Decimal`, nunca `float`, para no reintroducir el error de redondeo que esta migración vino a corregir.
+- Los scripts abren sus conexiones con `db.get_connection()`, que ya apunta a Postgres — no hace falta tocar eso.
+
+- [ ] **Paso 4: Verificar que los tests pasan y que los scripts arrancan**
+
+```bash
+python -m pytest tests/ -v
+python scripts/importar_datos.py --help
+python scripts/cargar_stock_por_proveedor.py --help
+python scripts/matchear_productos_proveedores.py --help
+python scripts/generar_planilla_stock_proveedores.py --help
+```
+
+- [ ] **Paso 5: Verificar que no quedó dialecto viejo**
+
+```bash
+grep -rn "lastrowid\|activo=1\|activo = 1\|INSERT OR IGNORE" scripts/*.py
+```
+
+Esperado: **sin resultados**.
+
+- [ ] **Paso 6: Commit**
+
+```bash
+git add scripts/ tests/test_scripts.py
+git commit -m "Portar los scripts de línea de comandos a Postgres
+
+importar_datos.py es la herramienta con la que se cargan los datos reales
+del negocio: si quedaba con dialecto SQLite, el sistema migrado no se podía
+poblar."
+```
+
+---
+
+### Tarea 12: Verificación integral y limpieza
 
 La última red de seguridad: recorrer las 67 rutas y confirmar que ninguna quedó rota.
 
@@ -1368,7 +1486,7 @@ Cada fallo es una consulta mal portada. Arreglarla y volver a correr hasta que p
 - [ ] **Paso 3: Limpiar restos de SQLite**
 
 ```bash
-grep -rn "sqlite3\|lastrowid\|INSERT OR IGNORE\|PRAGMA\|date('now')" core/ | grep -v "^core/.*#"
+grep -rn "sqlite3\|lastrowid\|INSERT OR IGNORE\|PRAGMA\|date('now')" core/ scripts/ | grep -v "^core/.*#"
 ```
 
 Esperado: **sin resultados**. Si aparece alguno, portarlo. Eliminar de `core/app.py` el `import sqlite3` si ya no se usa.
@@ -1376,7 +1494,7 @@ Esperado: **sin resultados**. Si aparece alguno, portarlo. Eliminar de `core/app
 - [ ] **Paso 4: Verificar que no quedaron `LIKE` sin migrar**
 
 ```bash
-grep -rn "LIKE" core/
+grep -rn "LIKE" core/ scripts/
 ```
 
 Esperado: solo `ILIKE`. Un `LIKE` suelto es un buscador roto en silencio.
