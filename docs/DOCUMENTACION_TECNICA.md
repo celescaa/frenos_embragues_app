@@ -11,16 +11,36 @@ instalación rápida ver el `README.md` de la raíz.
 ## 1. Arquitectura general
 
 Aplicación web monolítica: **Flask** (Python) del lado del servidor,
-**SQLite** como base de datos (un solo archivo, `data.db`), y **Bootstrap 5 +
-Chart.js** del lado del cliente (sin build step, sin frontend framework —
-las páginas son HTML renderizado por Jinja2 desde el servidor).
+**Postgres** como base de datos (alojado por [Supabase](https://supabase.com),
+en desarrollo local corre en un contenedor Docker levantado por la CLI de
+Supabase), y **Bootstrap 5 + Chart.js** del lado del cliente (sin build
+step, sin frontend framework — las páginas son HTML renderizado por
+Jinja2 desde el servidor).
+
+**Migrado desde SQLite a Postgres el 13/08/2026** — ver
+`CLAUDE.md` ("Migración a Postgres") para el detalle técnico completo del
+cambio (qué cambió en el código, el gotcha de `prepare_threshold=None`,
+etc.), acá solo el resumen que importa para entender la arquitectura
+actual: un archivo SQLite local no sobrevive en un entorno serverless
+(donde no hay disco persistente entre invocaciones) y tampoco permite que
+el sistema se use desde varias computadoras/instancias a la vez sin
+pisarse — dos requisitos que se volvieron necesarios apenas se definió
+desplegar en Vercel (ver §9). El esquema (tablas, columnas) ya no lo crea
+`core/database.py`: vive versionado en `supabase/migrations/`.
+
+**Esta es la arquitectura del "Plan 1" de dos**: el sistema corre completo
+sobre Postgres localmente y sigue funcionando con `python app.py`, pero
+**todavía no está desplegado en ningún lado** y el login sigue siendo el
+propio (tabla `usuarios`, `password_hash`) — el Plan 2 (ver `CLAUDE.md`)
+cubre migrar el login a Supabase Auth, las fotos de producto a Supabase
+Storage, y el deploy en sí en Vercel.
 
 Se eligió este stack a propósito por dos motivos: (1) es lo más simple que
 resuelve el problema — un negocio de un local con un puñado de usuarios no
-necesita microservicios ni una base de datos cliente-servidor, y (2) es
-también un ejercicio de aprendizaje para Celes de cómo se arma un sistema
-real de punta a punta, así que la simplicidad es una ventaja pedagógica, no
-solo técnica.
+necesita microservicios ni una arquitectura compleja, y (2) es también un
+ejercicio de aprendizaje para Celes de cómo se arma un sistema real de
+punta a punta, así que la simplicidad es una ventaja pedagógica, no solo
+técnica.
 
 **Una sola fuente de verdad.** La decisión de arquitectura más importante
 del proyecto: tanto la venta en el local como la venta por la tienda online
@@ -46,7 +66,7 @@ tiene que poder impedir que el local venda.
 | Componente | Elección | Por qué |
 |---|---|---|
 | Backend | Flask 3 | Liviano, sin *boilerplate*, alcanza de sobra para el tamaño del proyecto |
-| Base de datos | SQLite | Un solo archivo, cero configuración, respaldo = copiar un archivo. Corre local sin instalar un servidor de base de datos aparte |
+| Base de datos | Postgres (Supabase) | Antes SQLite (un solo archivo) — se cambió el 13/08/2026 porque un archivo local no sobrevive en un entorno serverless sin disco persistente (el destino de deploy elegido, Vercel) y porque impedía usar el sistema desde varias computadoras/instancias a la vez sin arriesgar datos pisados. Supabase da Postgres alojado más, para el Plan 2, autenticación y storage de archivos sin sumar otro proveedor |
 | Frontend | Bootstrap 5 + Chart.js (CDN) | Sin paso de build, sin Node.js — cualquiera puede abrir un `.html` y entenderlo |
 | PDF | xhtml2pdf | 100% Python (usa reportlab), sin dependencias de sistema (a diferencia de WeasyPrint/wkhtmltopdf, que necesitan Pango/Cairo/GTK instalados aparte) |
 | Excel | openpyxl | Lectura/escritura de `.xlsx`, con validaciones de datos (dropdowns) y estilos |
@@ -65,7 +85,8 @@ frenos_embragues_app/
 ├── app.py                    # shim de una línea: from core.app import app
 ├── core/                      # el núcleo del sistema (ver §4)
 │   ├── app.py                    # rutas y lógica (el 90% de la aplicación)
-│   ├── database.py               # esquema SQL + migraciones + datos de ejemplo
+│   ├── database.py               # conexión a Postgres + helpers de consulta/siembra
+│   │                                (el esquema en sí vive en supabase/migrations/)
 │   ├── facturacion_afip.py       # integración AFIP/ARCA (Factura C)
 │   ├── tienda_pagos.py           # integración Mercado Pago
 │   ├── comprobante_pdf.py        # genera el PDF de un comprobante
@@ -73,15 +94,19 @@ frenos_embragues_app/
 │   └── importar_factura.py       # lee facturas de compra (PDF/Excel/CSV)
 ├── scripts/                   # herramientas de línea de comandos (ver §6)
 │   └── archivo/                 # scripts de un solo uso ya usados, se guardan de referencia
+│                                  (uno todavía en dialecto SQLite, ver §6)
 ├── plantillas/                # Excels que completa el negocio a mano
 ├── listas_proveedores/        # listas de precios de proveedores (datos del negocio)
+├── supabase/                  # esquema de Postgres versionado (ver §5) y config de
+│                                 la CLI de Supabase para levantarlo en local
+├── tests/                     # suite de pytest (ver §8)
 ├── templates/                 # vistas HTML (Jinja2) — vive fuera de core/
 ├── static/                    # CSS propio, logos, fotos de producto — vive fuera de core/
 ├── docs/                      # esta documentación
-├── Dockerfile, docker-compose.yml, .dockerignore
+├── Dockerfile, docker-compose.yml, .dockerignore   # desactualizados, ver §9
 ├── requirements.txt
-├── .env.example                # variables de entorno documentadas (copiar a .env)
-└── data.db                     # la base de datos (se crea sola, no se sube al repo)
+└── .env.example                # variables de entorno documentadas (copiar a .env),
+                                   incluye DATABASE_URL
 ```
 
 Los 7 módulos de `core/` son el sistema en sí: `core/app.py` los importa
@@ -118,23 +143,38 @@ Puntos que vale la pena conocer si se va a tocar este archivo:
   se refleja en toda la app (navbar, comprobantes, tienda).
 
 ### `core/database.py`
-Define el esquema completo (`SCHEMA`, un `CREATE TABLE IF NOT EXISTS` por
-tabla) y `_migrar(conn)`, que agrega columnas nuevas a bases ya existentes
-de forma **idempotente** (revisa con `PRAGMA table_info` antes de cada
-`ALTER TABLE`, así correrlo de nuevo nunca rompe nada). Cualquier campo
-nuevo que se agregue a una tabla existente tiene que pasar por acá, nunca
-solo por el `CREATE TABLE` (si no, las bases que ya existen no lo reciben).
+**Reescrito por completo en la migración a Postgres (13/08/2026).** Ya no
+define el esquema ni lo migra — eso vive en `supabase/migrations/` (ver
+§5) y lo aplica la CLI de Supabase, no Python. Lo que queda acá es:
 
-También tiene `seed_admin_user()` (crea el primer usuario admin con
-contraseña al azar) y `seed_demo_data()` (carga datos de ejemplo si la base
-está vacía) — ambas se llaman una vez al arrancar `core/app.py` y no hacen
-nada si ya hay datos.
+- `get_connection()`: abre la conexión a Postgres. Trae
+  `prepare_threshold=None` — parámetro obligatorio, no cosmético, ver el
+  gotcha explicado en `CLAUDE.md` ("Migración a Postgres"): sin él, el
+  sistema funciona bien contra el pooler de Supabase en desarrollo y en
+  las primeras requests de producción, y empieza a fallar recién cuando
+  una consulta llega a su quinta ejecución — un bug tardío e intermitente,
+  difícil de relacionar con la causa.
+- Helpers de consulta (`obtener_categorias()`, `obtener_subcategorias()`,
+  `obtener_cotizaciones_producto()`, `obtener_mejor_precio_por_producto()`)
+  y de siembra de datos de ejemplo (`seed_demo_data()`, que sigue
+  llamándose una vez al arrancar `core/app.py` y no hace nada si la base
+  ya tiene productos cargados).
+- Las listas de referencia (`CATEGORIAS_INICIALES`, `SUBCATEGORIAS_INICIALES`,
+  etc.) que también usa `scripts/importar_datos.py` para validar — el dato
+  de siembra real ahora vive en la migración de Supabase, esto queda de
+  documentación/referencia.
 
-`INSTANCE_DIR` (variable de entorno `SI_INSTANCE_DIR`) controla dónde viven
-los archivos que tienen que sobrevivir a un redeploy (`data.db`,
-`.secret_key`, `credenciales_iniciales.txt`) — por defecto es la carpeta del
-proyecto (no cambia nada corriendo local), y en Docker apunta a un volumen
-montado (ver §7).
+Cualquier columna nueva que se agregue a una tabla existente ahora se hace
+con un archivo de migración SQL nuevo en `supabase/migrations/`, no
+tocando este módulo.
+
+**Ya no existe** `seed_admin_user()` (creaba el primer admin con
+contraseña al azar al arrancar): en un entorno serverless no tiene sentido
+correr eso en cada arranque en frío. El primer usuario admin se crea a
+mano hoy (ver §8) hasta que el Plan 2 pase el login a Supabase Auth.
+Tampoco existe ya `INSTANCE_DIR`/`SI_INSTANCE_DIR` (apuntaba a dónde vivía
+`data.db`) — la persistencia ahora es la variable `DATABASE_URL` apuntando
+a Postgres, no una carpeta de archivos locales.
 
 ### `core/facturacion_afip.py`
 Emite la Factura C electrónica contra ARCA vía Afip SDK cuando una venta es
@@ -181,8 +221,15 @@ el stock directo: siempre pasa por la pantalla de revisión manual.
 
 ## 5. Esquema de base de datos
 
-Todas las tablas viven en un único archivo SQLite (`data.db`). Resumen de
-las principales (ver `core/database.py` para las columnas completas):
+Todas las tablas viven en Postgres, definidas en
+`supabase/migrations/20260813145208_esquema_inicial.sql` (esquema versionado
+— cualquier cambio de columna es una migración SQL nueva en esa carpeta, no
+un `ALTER TABLE` suelto en Python). Dos diferencias de tipos que importan
+si se va a tocar este esquema: las columnas de plata son `NUMERIC(12,2)`
+(Python siempre las maneja como `Decimal`, nunca `float` — ver
+`a_decimal()` en `core/app.py` y el porqué en `CLAUDE.md`) y las fechas son
+`DATE`/`TIMESTAMPTZ` reales, no texto. Resumen de las tablas principales
+(ver la migración para las columnas completas):
 
 | Tabla | Para qué |
 |---|---|
@@ -197,9 +244,11 @@ las principales (ver `core/database.py` para las columnas completas):
 | `pedidos_web` / `pedido_web_items` | Carrito "en tránsito" de la tienda online mientras se espera la confirmación del pago (no es un segundo inventario, ver §1) |
 | `usuarios` | Login: hash de contraseña, rol (`admin`/`empleado`), bloqueo por intentos fallidos |
 
-Todas las migraciones de columnas nuevas están centralizadas en
-`database._migrar()` — es el único lugar que hay que tocar para agregar un
-campo a una tabla que ya existe en producción.
+Agregar un campo a una tabla que ya existe en producción es un archivo
+nuevo en `supabase/migrations/` (aplicado con `npx supabase db reset` en
+local, y con el paso de deploy correspondiente en producción) — ya no hay
+una función central en Python que lo haga (`database._migrar()` existía en
+la versión SQLite y se eliminó en la migración a Postgres).
 
 ## 6. Scripts de herramientas (`scripts/`)
 
@@ -212,7 +261,7 @@ de `scripts/`), por ejemplo: `python scripts/importar_datos.py`.
 | `limpiar_lista_proveedor.py` | Toma el Excel crudo de un proveedor (formato propio de cada uno, vía un "adaptador") y deja solo lo relevante a frenos/embragues con precio de venta sugerido | `python scripts/limpiar_lista_proveedor.py [carpeta] [salida.xlsx]` |
 | `generar_planilla_stock_proveedores.py` | Genera una planilla en blanco (una hoja por proveedor) para que alguien del negocio cargue a mano el stock real | `python scripts/generar_planilla_stock_proveedores.py [salida.xlsx]` |
 | `cargar_stock_por_proveedor.py` | Importa esa planilla ya completada — "Cantidad en stock" reemplaza el stock actual (no lo suma) | `python scripts/cargar_stock_por_proveedor.py [archivo.xlsx]` |
-| `archivo/cargar_ejemplo_proveedores.py` | **Archivado**, ya cumplió su función (piloto de carga que después se borró). Se conserva solo de referencia | — |
+| `archivo/cargar_ejemplo_proveedores.py` | **Archivado**, ya cumplió su función (piloto de carga que después se borró). Se conserva solo de referencia. **No portado a Postgres** (Tarea 12 de la migración lo dejó a propósito en dialecto SQLite — `sqlite3`, `lastrowid`, `PRAGMA` — por ser código retirado): no corre contra la base actual, ver el aviso en el propio archivo | — |
 
 Los scripts que necesitan la base agregan la carpeta raíz del proyecto a
 `sys.path` al principio del archivo y hacen `from core import database as
@@ -224,32 +273,79 @@ desde la raíz del proyecto.
 
 Todo secreto o dato de configuración se lee de variables de entorno, nunca
 hardcodeado. Ver `.env.example` en la raíz para la lista completa y
-comentada: incluye AFIP SDK, Mercado Pago, SMTP y las variables de Docker.
-El archivo real `.env` nunca se sube al repositorio (`.gitignore`) ni se
-comparte por chat.
+comentada: incluye `DATABASE_URL` (la cadena de conexión a Postgres — ver
+§8), AFIP SDK, Mercado Pago y SMTP. El archivo real `.env` nunca se sube al
+repositorio (`.gitignore`) ni se comparte por chat.
 
 ## 8. Cómo correr en desarrollo
 
+Requiere Postgres local, levantado por la CLI de Supabase (ver el paso a
+paso completo, con capturas de qué imprime cada comando, en el `README.md`
+de la raíz — acá el resumen técnico):
+
 ```
 pip install -r requirements.txt
+npx supabase start          # levanta Postgres en Docker y aplica supabase/migrations/
 python app.py
 ```
 
-Abre en `http://127.0.0.1:5050`. La primera vez crea `data.db` con datos de
-ejemplo y un usuario admin (contraseña en `credenciales_iniciales.txt`).
+Abre en `http://127.0.0.1:5050`. La primera vez carga datos de ejemplo
+(clientes, productos, ventas) si la base está vacía, pero **ya no crea un
+usuario admin solo** — `seed_admin_user()` se eliminó en la migración a
+Postgres porque no tiene sentido ejecutar eso en cada arranque en frío de
+un entorno serverless (ver §4). El primer admin se crea a mano, una sola
+vez, con `generate_password_hash()` + un `INSERT` directo a la tabla
+`usuarios` (comando exacto en el `README.md`) — hasta que el Plan 2 pase el
+login a Supabase Auth.
 
-## 9. Cómo desplegar con Docker
+`DATABASE_URL` (ver §7) apunta a ese Postgres local por default
+(`postgresql://postgres:postgres@127.0.0.1:54322/postgres`); no hace falta
+definirla a mano salvo que se levante en otro puerto o se apunte a otra
+base.
+
+### Suite de tests
+
+```
+python -m pytest tests/ -v
+```
+
+Con Postgres local levantado. `tests/conftest.py` deja la base de pruebas
+limpia después de cada test (trunca todas las tablas y resiembra
+`categorias`/`subcategorias`), así que es segura de correr repetidamente —
+pero no apuntarla nunca a la base con datos reales del negocio. Ver
+`CLAUDE.md` ("Migración a Postgres") para el detalle de cómo está armada
+la suite.
+
+## 9. Despliegue
+
+**El sistema todavía no está desplegado en ningún lado** (corre solo
+local) — este es el "Plan 1" de dos, ver §1 y `CLAUDE.md` ("Migración a
+Postgres" → "Plan 1 de 2"). El camino de deploy elegido es **Vercel +
+Supabase**: Vercel para correr la app (funciones serverless) y Supabase
+para Postgres, autenticación y storage de archivos. El Plan 2 (a escribir
+en `docs/superpowers/plans/`) cubre lo que falta: migrar el login a
+Supabase Auth, mover las fotos de producto a Supabase Storage, `vercel.json`,
+`ProxyFix` (necesario detrás del proxy de Vercel), `SESSION_COOKIE_SECURE`,
+variables de entorno de producción, y el deploy en sí.
+
+### Docker (desactualizado, escrito para la versión en SQLite)
 
 ```
 docker compose up --build
 ```
 
-El `Dockerfile` corre la app con **gunicorn** (nunca con `app.run(debug=True)`,
-que es solo para desarrollo). Los datos persistentes (`data.db`,
-`.secret_key`, `credenciales_iniciales.txt`, fotos de producto) se montan
-como volúmenes — sin eso, se pierden cada vez que se recrea el contenedor.
-Ver la sección "Dockerización" en `CLAUDE.md` para el detalle completo y el
-aviso importante sobre hostings con disco efímero.
+Este `Dockerfile`/`docker-compose.yml` se escribieron cuando el sistema
+corría sobre SQLite y montaban un volumen de disco (`SI_INSTANCE_DIR`) para
+que `data.db`, `.secret_key`, `credenciales_iniciales.txt` y las fotos de
+producto sobrevivieran a que se recreara el contenedor. Tras la migración
+a Postgres, `SI_INSTANCE_DIR` ya no existe en el código (`core/database.py`
+no lo define más) — el `Dockerfile` sigue fijando esa variable de entorno
+pero el código ya no la lee, así que la promesa de persistencia que
+describía esta sección ya no aplica (la persistencia real ahora es
+`DATABASE_URL` apuntando a Postgres). Como el plan de deploy ya no es este
+camino sino Vercel (arriba), es probable que este `Dockerfile` quede
+reemplazado en el Plan 2 en vez de actualizado — ver la nota equivalente
+en la sección "Dockerización" de `CLAUDE.md`.
 
 ## 10. Seguridad implementada
 
@@ -259,9 +355,13 @@ aviso importante sobre hostings con disco efímero.
 - `app.secret_key` generada al azar, guardada fuera del código.
 - Toda ruta requiere sesión iniciada por defecto (antes visto en `core/app.py`, §4).
 
-Pendiente (ver CLAUDE.md, sección "Seguridad", para el detalle y el orden
-de prioridad): backups automáticos, HTTPS + `SESSION_COOKIE_SECURE` cuando
-el sistema quede expuesto a internet, protección CSRF, 2FA.
+Pendiente (ver CLAUDE.md, sección "Seguridad", para el detalle actualizado
+y el orden de prioridad — esta lista puede haber quedado desactualizada en
+algún punto además del que sigue, revisar la fuente): HTTPS +
+`SESSION_COOKIE_SECURE` cuando el sistema quede expuesto a internet, 2FA.
+Backups: con Postgres/Supabase (ver §1) esto cambia respecto a cuando el
+dato vivía en `data.db` — en producción los maneja Supabase según el plan
+contratado, ver el detalle en `CLAUDE.md`.
 
 ## 11. Integraciones externas — estado
 

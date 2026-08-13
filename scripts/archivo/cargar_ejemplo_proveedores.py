@@ -5,6 +5,15 @@ base real; ese piloto ya se borró (ver CLAUDE.md, "Estado actual") cuando se
 decidió esperar a la carga de stock real por proveedor en su lugar. Se deja
 acá solo como referencia de cómo se hizo, no para volver a correrlo.
 
+NO FUNCIONA CONTRA LA BASE ACTUAL (13/08/2026): el sistema migró de SQLite
+a Postgres (ver CLAUDE.md, "Migración a Postgres") y este script se dejó
+a propósito sin portar, por ser código retirado que ya cumplió su función
+-- todavía usa `sqlite3.connect(DB_PATH)`, `cursor.lastrowid` e
+`INSERT OR IGNORE`, que no existen en Postgres/psycopg. No lo corras tal
+cual esperando que ande; si algún día hace falta resucitarlo, portarlo
+primero siguiendo el mismo patrón que el resto de scripts/ (ver
+core/database.py y cualquier script ya portado como referencia).
+
 Carga una tanda de ejemplo desde Lista_Proveedores_Limpia.xlsx (generada por
 scripts/limpiar_lista_proveedor.py) a la base real, para probar el flujo
 antes de hacer la carga completa ya revisada.
