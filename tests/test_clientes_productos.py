@@ -3,7 +3,7 @@ mayúsculas, en Postgres sí. Si alguien olvida un ILIKE, el buscador deja de
 encontrar cosas sin lanzar ningún error."""
 from decimal import Decimal
 import pytest
-from core.app import app as flask_app
+from core.app import app as flask_app, a_decimal
 
 
 @pytest.fixture
@@ -66,10 +66,18 @@ def test_codigo_duplicado_da_mensaje_claro_y_no_rompe(client, db_conn):
 
 
 def test_precio_se_guarda_como_decimal_exacto(client, db_conn):
-    """precio_costo/precio_venta son NUMERIC(12,2): si alguien vuelve a
-    convertirlos con float() en vez de Decimal, este valor delata el
-    problema (float("1234.56") no es exactamente Decimal("1234.56") en
-    memoria, aunque Postgres redondee igual al guardarlo)."""
+    """Prueba de punta a punta: el alta de un producto por la ruta persiste
+    el precio correcto en la base.
+
+    OJO, esto NO es un test de regresión contra el uso de float() para la
+    plata (para eso ver test_a_decimal_convierte_a_decimal_no_a_float, más
+    abajo): se verificó a mano que este test sigue pasando igual si
+    a_decimal() se revierte a float(valor or 0) -- el cast de Postgres a
+    NUMERIC(12,2) redondea a 2 decimales y absorbe el error del flotante
+    para cualquier monto realista, y psycopg siempre deserializa una
+    columna NUMERIC como Decimal sin importar qué tipo de Python la
+    escribió. Por eso el guardián real vive en el test de la función pura,
+    no acá."""
     respuesta = client.post("/productos/nuevo", data={
         "nombre": "Producto con decimales",
         "categoria": "Frenos",
@@ -85,3 +93,22 @@ def test_precio_se_guarda_como_decimal_exacto(client, db_conn):
     assert fila["precio_costo"] == Decimal("1234.56")
     assert fila["precio_venta"] == Decimal("2345.67")
     assert isinstance(fila["precio_costo"], Decimal)
+
+
+def test_a_decimal_convierte_a_decimal_no_a_float():
+    """Guardián real contra volver a usar float() en a_decimal(): test
+    unitario de la función pura, sin base de datos de por medio. A
+    diferencia de test_precio_se_guarda_como_decimal_exacto, este SÍ falla
+    si alguien revierte a_decimal() a float(valor or 0) -- no hay cast de
+    NUMERIC ni deserialización de psycopg que lo disimule acá."""
+    resultado = a_decimal("1234.56")
+    assert isinstance(resultado, Decimal)
+    assert not isinstance(resultado, float)
+    assert resultado == Decimal("1234.56")
+
+    # campo ausente (None) y campo vacío ("") -- mismo criterio que el
+    # `or 0` que ya usaba cada sitio antes de existir el helper.
+    assert a_decimal(None) == Decimal("0")
+    assert isinstance(a_decimal(None), Decimal)
+    assert a_decimal("") == Decimal("0")
+    assert isinstance(a_decimal(""), Decimal)
