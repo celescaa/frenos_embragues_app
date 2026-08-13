@@ -23,7 +23,12 @@ from openpyxl import load_workbook
 # arriba de scripts/).
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from core import database as db
-import importar_datos as idatos  # reutiliza _limpiar/_numero/_normalizar_categoria (sibling en scripts/)
+# reutiliza _limpiar/_numero/_normalizar_categoria (sibling en scripts/). Se
+# importa como `scripts.importar_datos` (no `import importar_datos` a secas)
+# para que este módulo se pueda importar como `scripts.cargar_stock_por_proveedor`
+# (por ejemplo desde tests/test_scripts.py) sin depender de que scripts/ esté
+# en sys.path -- algo que solo pasa solo cuando se corre como script suelto.
+from scripts import importar_datos as idatos
 
 ARCHIVO_POR_DEFECTO = "plantillas/Planilla_Stock_Por_Proveedor.xlsx"
 NOMBRE_PROVEEDOR_SIN_IDENTIFICAR = "Proveedor sin identificar (revisar)"
@@ -46,13 +51,16 @@ def _filas_de_hoja(ws):
         yield fila
 
 
-def _obtener_o_crear_proveedor(conn, nombre, resumen):
-    fila = conn.execute("SELECT id FROM proveedores WHERE nombre = ?", (nombre,)).fetchone()
+def obtener_o_crear_proveedor(conn, nombre, resumen=None):
+    fila = conn.execute("SELECT id FROM proveedores WHERE nombre = %s", (nombre,)).fetchone()
     if fila:
         return fila["id"]
-    cur = conn.execute("INSERT INTO proveedores (nombre) VALUES (?)", (nombre,))
-    resumen["proveedores_nuevos"] += 1
-    return cur.lastrowid
+    nuevo = conn.execute(
+        "INSERT INTO proveedores (nombre) VALUES (%s) RETURNING id", (nombre,)
+    ).fetchone()
+    if resumen is not None:
+        resumen["proveedores_nuevos"] += 1
+    return nuevo["id"]
 
 
 def _procesar_hoja(ws, proveedor_id, proveedor_nombre, conn, resumen):
@@ -86,15 +94,15 @@ def _procesar_hoja(ws, proveedor_id, proveedor_nombre, conn, resumen):
 
         existente = None
         if codigo:
-            existente = conn.execute("SELECT id FROM productos WHERE codigo = ?", (codigo,)).fetchone()
+            existente = conn.execute("SELECT id FROM productos WHERE codigo = %s", (codigo,)).fetchone()
         if not existente:
-            existente = conn.execute("SELECT id FROM productos WHERE nombre = ?", (nombre,)).fetchone()
+            existente = conn.execute("SELECT id FROM productos WHERE nombre = %s", (nombre,)).fetchone()
 
         if existente:
             conn.execute(
-                """UPDATE productos SET codigo=?, nombre=?, categoria=?, marca=?, modelo_compatible=?,
-                   precio_costo=?, precio_venta=?, stock_actual=?, stock_minimo=?, proveedor_id=?,
-                   codigo_barras=? WHERE id=?""",
+                """UPDATE productos SET codigo=%s, nombre=%s, categoria=%s, marca=%s, modelo_compatible=%s,
+                   precio_costo=%s, precio_venta=%s, stock_actual=%s, stock_minimo=%s, proveedor_id=%s,
+                   codigo_barras=%s WHERE id=%s""",
                 (*valores, existente["id"]),
             )
             resumen["productos_actualizados"] += 1
@@ -103,13 +111,16 @@ def _procesar_hoja(ws, proveedor_id, proveedor_nombre, conn, resumen):
                 """INSERT INTO productos
                    (codigo, nombre, categoria, marca, modelo_compatible, precio_costo, precio_venta,
                     stock_actual, stock_minimo, proveedor_id, codigo_barras)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
                 valores,
             )
             resumen["productos_nuevos"] += 1
 
 
 def main():
+    if len(sys.argv) > 1 and sys.argv[1] in ("-h", "--help"):
+        print(__doc__)
+        return
     archivo = sys.argv[1] if len(sys.argv) > 1 else ARCHIVO_POR_DEFECTO
     wb = load_workbook(archivo, data_only=True)
     conn = db.get_connection()
@@ -126,7 +137,7 @@ def main():
         else:
             proveedor_nombre = nombre_hoja
 
-        proveedor_id = _obtener_o_crear_proveedor(conn, proveedor_nombre, resumen)
+        proveedor_id = obtener_o_crear_proveedor(conn, proveedor_nombre, resumen)
         antes = resumen["productos_nuevos"] + resumen["productos_actualizados"]
         _procesar_hoja(ws, proveedor_id, proveedor_nombre, conn, resumen)
         cargados = resumen["productos_nuevos"] + resumen["productos_actualizados"] - antes

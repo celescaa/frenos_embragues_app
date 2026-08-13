@@ -13,6 +13,7 @@ import sys
 import os
 import unicodedata
 from datetime import datetime
+from decimal import Decimal, InvalidOperation
 from functools import lru_cache
 
 try:
@@ -67,18 +68,30 @@ def _limpiar(valor):
 
 
 def _numero(valor, entero=False):
+    """Tolera el formato argentino (14.900,50) y separadores "$"/espacios.
+
+    Para columnas de plata (entero=False) devuelve `Decimal`, nunca `float`
+    -- las columnas son NUMERIC en Postgres y mezclar Decimal con float más
+    adelante en una cuenta lanza TypeError, además de reintroducir el error
+    de redondeo que esta migración vino a corregir. Para columnas enteras
+    (stock, cantidad) sigue devolviendo `int`, sin cambios."""
     if valor is None or str(valor).strip() == "":
-        return 0
+        return 0 if entero else Decimal("0")
     texto = str(valor).strip().replace("$", "").replace(" ", "")
     # tolera formato argentino: 14.900,50
     if "," in texto and "." in texto:
         texto = texto.replace(".", "").replace(",", ".")
     elif "," in texto:
         texto = texto.replace(",", ".")
+    if entero:
+        try:
+            return int(float(texto))
+        except ValueError:
+            return 0
     try:
-        return int(float(texto)) if entero else float(texto)
-    except ValueError:
-        return 0
+        return Decimal(texto)
+    except InvalidOperation:
+        return Decimal("0")
 
 
 def _es_ejemplo(fila):
@@ -102,15 +115,18 @@ def _filas(ws):
 
 
 def _fecha(valor):
+    """Misma tolerancia de formatos de siempre, pero ahora entrega un
+    `datetime.date` (no una cadena "YYYY-MM-DD") -- las columnas de fecha
+    son DATE en Postgres."""
     if isinstance(valor, datetime):
-        return valor.strftime("%Y-%m-%d")
+        return valor.date()
     texto = _limpiar(valor)
     for fmt in ("%Y-%m-%d", "%d/%m/%Y", "%d-%m-%Y", "%Y/%m/%d"):
         try:
-            return datetime.strptime(texto[:10], fmt).strftime("%Y-%m-%d")
+            return datetime.strptime(texto[:10], fmt).date()
         except ValueError:
             continue
-    return datetime.now().strftime("%Y-%m-%d")
+    return datetime.now().date()
 
 
 # ---------------------------------------------------------------------------
@@ -120,16 +136,16 @@ def importar_proveedores(ws, conn, resumen):
         if not nombre:
             continue
         datos = (nombre, _limpiar(fila[1]), _limpiar(fila[2]), _limpiar(fila[3]), _limpiar(fila[4]))
-        existente = conn.execute("SELECT id FROM proveedores WHERE nombre = ?", (nombre,)).fetchone()
+        existente = conn.execute("SELECT id FROM proveedores WHERE nombre = %s", (nombre,)).fetchone()
         if existente:
             conn.execute(
-                "UPDATE proveedores SET telefono=?, email=?, direccion=?, cuit=? WHERE id=?",
+                "UPDATE proveedores SET telefono=%s, email=%s, direccion=%s, cuit=%s WHERE id=%s",
                 (*datos[1:], existente["id"]),
             )
             resumen["proveedores_actualizados"] += 1
         else:
             conn.execute(
-                "INSERT INTO proveedores (nombre, telefono, email, direccion, cuit) VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO proveedores (nombre, telefono, email, direccion, cuit) VALUES (%s, %s, %s, %s, %s)",
                 datos,
             )
             resumen["proveedores_nuevos"] += 1
@@ -151,12 +167,14 @@ def importar_productos(ws, conn, resumen):
         proveedor_nombre = _limpiar(fila[9])
         proveedor_id = None
         if proveedor_nombre:
-            p = conn.execute("SELECT id FROM proveedores WHERE nombre = ?", (proveedor_nombre,)).fetchone()
+            p = conn.execute("SELECT id FROM proveedores WHERE nombre = %s", (proveedor_nombre,)).fetchone()
             if p:
                 proveedor_id = p["id"]
             else:
-                cur = conn.execute("INSERT INTO proveedores (nombre) VALUES (?)", (proveedor_nombre,))
-                proveedor_id = cur.lastrowid
+                nuevo = conn.execute(
+                    "INSERT INTO proveedores (nombre) VALUES (%s) RETURNING id", (proveedor_nombre,)
+                ).fetchone()
+                proveedor_id = nuevo["id"]
                 resumen["proveedores_nuevos"] += 1
                 resumen["avisos"].append(
                     f"Se creó el proveedor '{proveedor_nombre}' porque figuraba en un producto pero no en la hoja PROVEEDORES."
@@ -170,15 +188,15 @@ def importar_productos(ws, conn, resumen):
 
         existente = None
         if codigo:
-            existente = conn.execute("SELECT id FROM productos WHERE codigo = ?", (codigo,)).fetchone()
+            existente = conn.execute("SELECT id FROM productos WHERE codigo = %s", (codigo,)).fetchone()
         if not existente:
-            existente = conn.execute("SELECT id FROM productos WHERE nombre = ?", (nombre,)).fetchone()
+            existente = conn.execute("SELECT id FROM productos WHERE nombre = %s", (nombre,)).fetchone()
 
         if existente:
             conn.execute(
-                """UPDATE productos SET codigo=?, nombre=?, categoria=?, marca=?, modelo_compatible=?,
-                   precio_costo=?, precio_venta=?, stock_actual=?, stock_minimo=?, proveedor_id=?,
-                   codigo_barras=? WHERE id=?""",
+                """UPDATE productos SET codigo=%s, nombre=%s, categoria=%s, marca=%s, modelo_compatible=%s,
+                   precio_costo=%s, precio_venta=%s, stock_actual=%s, stock_minimo=%s, proveedor_id=%s,
+                   codigo_barras=%s WHERE id=%s""",
                 (*valores, existente["id"]),
             )
             resumen["productos_actualizados"] += 1
@@ -187,29 +205,29 @@ def importar_productos(ws, conn, resumen):
                 """INSERT INTO productos
                    (codigo, nombre, categoria, marca, modelo_compatible, precio_costo, precio_venta,
                     stock_actual, stock_minimo, proveedor_id, codigo_barras)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
                 valores,
             )
             resumen["productos_nuevos"] += 1
 
 
 def importar_clientes(ws, conn, resumen):
-    hoy = datetime.now().strftime("%Y-%m-%d")
+    hoy = datetime.now().date()
     for fila in _filas(ws):
         nombre = _limpiar(fila[0])
         if not nombre:
             continue
         datos = (nombre, _limpiar(fila[1]), _limpiar(fila[2]), _limpiar(fila[3]), _limpiar(fila[4]))
-        existente = conn.execute("SELECT id FROM clientes WHERE nombre = ?", (nombre,)).fetchone()
+        existente = conn.execute("SELECT id FROM clientes WHERE nombre = %s", (nombre,)).fetchone()
         if existente:
             conn.execute(
-                "UPDATE clientes SET telefono=?, email=?, direccion=?, cuit_dni=? WHERE id=?",
+                "UPDATE clientes SET telefono=%s, email=%s, direccion=%s, cuit_dni=%s WHERE id=%s",
                 (*datos[1:], existente["id"]),
             )
             resumen["clientes_actualizados"] += 1
         else:
             conn.execute(
-                "INSERT INTO clientes (nombre, telefono, email, direccion, cuit_dni, fecha_alta) VALUES (?, ?, ?, ?, ?, ?)",
+                "INSERT INTO clientes (nombre, telefono, email, direccion, cuit_dni, fecha_alta) VALUES (%s, %s, %s, %s, %s, %s)",
                 (*datos, hoy),
             )
             resumen["clientes_nuevos"] += 1
@@ -240,22 +258,22 @@ def importar_ventas(ws, conn, resumen):
 
         cliente_id = None
         if cliente_nombre:
-            c = conn.execute("SELECT id FROM clientes WHERE nombre = ?", (cliente_nombre,)).fetchone()
+            c = conn.execute("SELECT id FROM clientes WHERE nombre = %s", (cliente_nombre,)).fetchone()
             if c:
                 cliente_id = c["id"]
             else:
-                cur = conn.execute(
-                    "INSERT INTO clientes (nombre, fecha_alta) VALUES (?, ?)",
-                    (cliente_nombre, datetime.now().strftime("%Y-%m-%d")),
-                )
-                cliente_id = cur.lastrowid
+                nuevo = conn.execute(
+                    "INSERT INTO clientes (nombre, fecha_alta) VALUES (%s, %s) RETURNING id",
+                    (cliente_nombre, datetime.now().date()),
+                ).fetchone()
+                cliente_id = nuevo["id"]
                 resumen["clientes_nuevos"] += 1
 
         items = []
-        total = 0
+        total = Decimal("0")
         for producto_ref, cantidad, precio in datos["items"]:
             p = conn.execute(
-                "SELECT id, precio_venta FROM productos WHERE codigo = ? OR nombre = ?",
+                "SELECT id, precio_venta FROM productos WHERE codigo = %s OR nombre = %s",
                 (producto_ref, producto_ref),
             ).fetchone()
             if not p:
@@ -272,16 +290,15 @@ def importar_ventas(ws, conn, resumen):
             continue
 
         numero = comprobante if not comprobante.startswith("__fila_") else ""
-        cur = conn.cursor()
-        cur.execute(
+        venta = conn.execute(
             """INSERT INTO ventas (fecha, cliente_id, total, metodo_pago, tipo_comprobante, numero_comprobante)
-               VALUES (?, ?, ?, ?, ?, ?)""",
+               VALUES (%s, %s, %s, %s, %s, %s) RETURNING id""",
             (fecha, cliente_id, total, datos["metodo"], "Remito", numero),
-        )
-        venta_id = cur.lastrowid
+        ).fetchone()
+        venta_id = venta["id"]
         for producto_id, cantidad, precio, subtotal in items:
-            cur.execute(
-                "INSERT INTO venta_items (venta_id, producto_id, cantidad, precio_unitario, subtotal) VALUES (?, ?, ?, ?, ?)",
+            conn.execute(
+                "INSERT INTO venta_items (venta_id, producto_id, cantidad, precio_unitario, subtotal) VALUES (%s, %s, %s, %s, %s)",
                 (venta_id, producto_id, cantidad, precio, subtotal),
             )
         resumen["ventas_nuevas"] += 1

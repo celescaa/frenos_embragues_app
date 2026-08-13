@@ -47,6 +47,7 @@ import os
 import argparse
 import difflib
 import unicodedata
+from decimal import Decimal, InvalidOperation
 
 import openpyxl
 
@@ -84,19 +85,23 @@ def _limpiar(v):
 
 
 def _numero(v):
+    """Devuelve `Decimal` (nunca `float`): `costo` termina en
+    producto_proveedor.precio_costo, columna NUMERIC."""
     if v is None or v == "":
-        return 0.0
+        return Decimal("0")
+    if isinstance(v, Decimal):
+        return v
     if isinstance(v, (int, float)):
-        return float(v)
+        return Decimal(str(v))
     texto = str(v).strip().replace("$", "").replace(" ", "")
     if "," in texto and "." in texto:
         texto = texto.replace(".", "").replace(",", ".")
     elif "," in texto:
         texto = texto.replace(",", ".")
     try:
-        return float(texto)
-    except ValueError:
-        return 0.0
+        return Decimal(texto)
+    except InvalidOperation:
+        return Decimal("0")
 
 
 def _mapear_encabezados(headers):
@@ -110,12 +115,14 @@ def _mapear_encabezados(headers):
 
 
 def _obtener_o_crear_proveedor(conn, nombre, resumen):
-    fila = conn.execute("SELECT id FROM proveedores WHERE nombre = ?", (nombre,)).fetchone()
+    fila = conn.execute("SELECT id FROM proveedores WHERE nombre = %s", (nombre,)).fetchone()
     if fila:
         return fila["id"]
     resumen["proveedores_nuevos"].append(nombre)
-    cur = conn.execute("INSERT INTO proveedores (nombre) VALUES (?)", (nombre,))
-    return cur.lastrowid
+    nuevo = conn.execute(
+        "INSERT INTO proveedores (nombre) VALUES (%s) RETURNING id", (nombre,)
+    ).fetchone()
+    return nuevo["id"]
 
 
 def _catalogo_candidatos(conn, categoria=None, subcategoria=None):
@@ -124,10 +131,10 @@ def _catalogo_candidatos(conn, categoria=None, subcategoria=None):
     consulta = "SELECT * FROM productos"
     condiciones, params = [], []
     if categoria:
-        condiciones.append("categoria = ?")
+        condiciones.append("categoria = %s")
         params.append(categoria)
     if subcategoria:
-        condiciones.append("subcategoria = ?")
+        condiciones.append("subcategoria = %s")
         params.append(subcategoria)
     if condiciones:
         consulta += " WHERE " + " AND ".join(condiciones)
@@ -214,8 +221,10 @@ def procesar(archivo, categoria, subcategoria, umbral, aplicar):
                     if proveedor_id is None:
                         proveedor_id = _obtener_o_crear_proveedor(conn, proveedor_nombre, resumen)
                     conn.execute(
-                        """INSERT OR REPLACE INTO producto_proveedor (producto_id, proveedor_id, precio_costo, codigo_proveedor)
-                           VALUES (?, ?, ?, ?)""",
+                        """INSERT INTO producto_proveedor (producto_id, proveedor_id, precio_costo, codigo_proveedor)
+                           VALUES (%s, %s, %s, %s)
+                           ON CONFLICT (producto_id, proveedor_id)
+                           DO UPDATE SET precio_costo = EXCLUDED.precio_costo, codigo_proveedor = EXCLUDED.codigo_proveedor""",
                         (match["id"], proveedor_id, costo, codigo_prov),
                     )
                 filas_reporte.append((proveedor_nombre, codigo_prov, descripcion, metodo, match["nombre"], round(score or 1.0, 2), costo))

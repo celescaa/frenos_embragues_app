@@ -87,9 +87,16 @@ def _escribir_hoja(wb, nombre_hoja, categorias, con_nota_identificacion=False):
     return ws
 
 
+def obtener_proveedores_activos(conn):
+    """Proveedores activos, para armarles una hoja cada uno. `activo` es
+    BOOLEAN en Postgres -- comparar contra 1 (`activo=1`) tira
+    "operator does not exist: boolean = integer"."""
+    return conn.execute("SELECT nombre FROM proveedores WHERE activo IS TRUE ORDER BY nombre").fetchall()
+
+
 def generar(salida=SALIDA_POR_DEFECTO):
     conn = db.get_connection()
-    proveedores = conn.execute("SELECT nombre FROM proveedores WHERE activo=1 ORDER BY nombre").fetchall()
+    proveedores = obtener_proveedores_activos(conn)
     categorias = db.obtener_categorias(conn)
     conn.close()
 
@@ -130,4 +137,7 @@ def generar(salida=SALIDA_POR_DEFECTO):
 
 
 if __name__ == "__main__":
-    generar(sys.argv[1] if len(sys.argv) > 1 else SALIDA_POR_DEFECTO)
+    if len(sys.argv) > 1 and sys.argv[1] in ("-h", "--help"):
+        print(__doc__)
+    else:
+        generar(sys.argv[1] if len(sys.argv) > 1 else SALIDA_POR_DEFECTO)
