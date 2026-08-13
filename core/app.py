@@ -9,7 +9,6 @@ sistema).
 """
 import os
 import secrets
-import sqlite3
 import psycopg
 from decimal import Decimal
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, session
@@ -1050,7 +1049,7 @@ def proveedores_lista():
     if mostrar_todos:
         proveedores = conn.execute("SELECT * FROM proveedores ORDER BY activo DESC, nombre").fetchall()
     else:
-        proveedores = conn.execute("SELECT * FROM proveedores WHERE activo=1 ORDER BY nombre").fetchall()
+        proveedores = conn.execute("SELECT * FROM proveedores WHERE activo IS TRUE ORDER BY nombre").fetchall()
     conn.close()
     return render_template("proveedores.html", proveedores=proveedores, mostrar_todos=mostrar_todos)
 
@@ -1060,7 +1059,7 @@ def proveedores_nuevo():
     if request.method == "POST":
         conn = db.get_connection()
         conn.execute(
-            "INSERT INTO proveedores (nombre, telefono, email, direccion, cuit) VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO proveedores (nombre, telefono, email, direccion, cuit) VALUES (%s, %s, %s, %s, %s)",
             (
                 request.form["nombre"],
                 request.form.get("telefono", ""),
@@ -1081,7 +1080,7 @@ def proveedores_editar(proveedor_id):
     conn = db.get_connection()
     if request.method == "POST":
         conn.execute(
-            "UPDATE proveedores SET nombre=?, telefono=?, email=?, direccion=?, cuit=? WHERE id=?",
+            "UPDATE proveedores SET nombre=%s, telefono=%s, email=%s, direccion=%s, cuit=%s WHERE id=%s",
             (
                 request.form["nombre"],
                 request.form.get("telefono", ""),
@@ -1095,7 +1094,7 @@ def proveedores_editar(proveedor_id):
         conn.close()
         flash("Proveedor actualizado.", "success")
         return redirect(url_for("proveedores_lista"))
-    proveedor = conn.execute("SELECT * FROM proveedores WHERE id=?", (proveedor_id,)).fetchone()
+    proveedor = conn.execute("SELECT * FROM proveedores WHERE id=%s", (proveedor_id,)).fetchone()
     conn.close()
     return render_template("proveedor_form.html", proveedor=proveedor)
 
@@ -1104,10 +1103,10 @@ def proveedores_editar(proveedor_id):
 def proveedores_eliminar(proveedor_id):
     conn = db.get_connection()
     try:
-        conn.execute("DELETE FROM proveedores WHERE id=?", (proveedor_id,))
+        conn.execute("DELETE FROM proveedores WHERE id=%s", (proveedor_id,))
         conn.commit()
         flash("Proveedor eliminado.", "info")
-    except sqlite3.IntegrityError:
+    except psycopg.errors.ForeignKeyViolation:
         conn.rollback()
         flash("No se puede eliminar: este proveedor tiene productos, compras o cotizaciones cargadas. "
               "Desactivalo en su lugar (no se va a poder elegir para nada nuevo, pero no rompe lo ya cargado).", "danger")
@@ -1118,7 +1117,7 @@ def proveedores_eliminar(proveedor_id):
 @app.route("/proveedores/<int:proveedor_id>/activar", methods=["POST"])
 def proveedores_activar(proveedor_id):
     conn = db.get_connection()
-    conn.execute("UPDATE proveedores SET activo=1 WHERE id=?", (proveedor_id,))
+    conn.execute("UPDATE proveedores SET activo=true WHERE id=%s", (proveedor_id,))
     conn.commit()
     conn.close()
     flash("Proveedor activado.", "success")
@@ -1128,7 +1127,7 @@ def proveedores_activar(proveedor_id):
 @app.route("/proveedores/<int:proveedor_id>/desactivar", methods=["POST"])
 def proveedores_desactivar(proveedor_id):
     conn = db.get_connection()
-    conn.execute("UPDATE proveedores SET activo=0 WHERE id=?", (proveedor_id,))
+    conn.execute("UPDATE proveedores SET activo=false WHERE id=%s", (proveedor_id,))
     conn.commit()
     conn.close()
     flash("Proveedor desactivado: no va a aparecer para elegir en compras nuevas, pero lo ya cargado sigue intacto.", "info")
@@ -1707,7 +1706,7 @@ def compras_nueva():
         nombre_nuevo = request.form.get("proveedor_nuevo_nombre", "").strip()
         if not proveedor_id and nombre_nuevo:
             cur = conn.execute(
-                "INSERT INTO proveedores (nombre, telefono, email, direccion, cuit) VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO proveedores (nombre, telefono, email, direccion, cuit) VALUES (%s, %s, %s, %s, %s) RETURNING id",
                 (
                     nombre_nuevo,
                     request.form.get("proveedor_nuevo_telefono", "").strip() or None,
@@ -1716,7 +1715,7 @@ def compras_nueva():
                     request.form.get("proveedor_nuevo_cuit", "").strip() or None,
                 ),
             )
-            proveedor_id = cur.lastrowid
+            proveedor_id = cur.fetchone()["id"]
             flash(f"Se creó el proveedor '{nombre_nuevo}'.", "success")
 
         producto_ids = request.form.getlist("producto_id")
@@ -1724,12 +1723,12 @@ def compras_nueva():
         precios = request.form.getlist("precio_unitario")
 
         items = []
-        total = 0
+        total = Decimal("0")
         for pid, cant, precio in zip(producto_ids, cantidades, precios):
             if not pid or not cant:
                 continue
             cant = int(cant)
-            precio = float(precio or 0)
+            precio = a_decimal(precio)
             if cant <= 0:
                 continue
             subtotal = cant * precio
@@ -1743,20 +1742,20 @@ def compras_nueva():
 
         cur = conn.cursor()
         cur.execute(
-            "INSERT INTO compras (fecha, proveedor_id, total, numero_factura_proveedor) VALUES (?, ?, ?, ?)",
+            "INSERT INTO compras (fecha, proveedor_id, total, numero_factura_proveedor) VALUES (%s, %s, %s, %s) RETURNING id",
             (datetime.now().strftime("%Y-%m-%d"), proveedor_id, total, numero_factura),
         )
-        compra_id = cur.lastrowid
+        compra_id = cur.fetchone()["id"]
         for producto_id, cant, precio_unitario, subtotal in items:
             cur.execute(
-                "INSERT INTO compra_items (compra_id, producto_id, cantidad, precio_unitario, subtotal) VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO compra_items (compra_id, producto_id, cantidad, precio_unitario, subtotal) VALUES (%s, %s, %s, %s, %s)",
                 (compra_id, producto_id, cant, precio_unitario, subtotal),
             )
             # la compra repone stock, actualiza el costo del producto y
             # limpia la marca de "pedido pendiente" si tenía (ya llegó)
             cur.execute(
-                """UPDATE productos SET stock_actual = stock_actual + ?, precio_costo = ?,
-                   pedido_pendiente = 0, fecha_pedido_pendiente = NULL WHERE id = ?""",
+                """UPDATE productos SET stock_actual = stock_actual + %s, precio_costo = %s,
+                   pedido_pendiente = false, fecha_pedido_pendiente = NULL WHERE id = %s""",
                 (cant, precio_unitario, producto_id),
             )
         conn.commit()
@@ -1764,7 +1763,7 @@ def compras_nueva():
         flash("Compra registrada y stock actualizado.", "success")
         return redirect(url_for("compras_lista"))
 
-    proveedores = conn.execute("SELECT * FROM proveedores WHERE activo=1 ORDER BY nombre").fetchall()
+    proveedores = conn.execute("SELECT * FROM proveedores WHERE activo IS TRUE ORDER BY nombre").fetchall()
     productos = conn.execute("SELECT * FROM productos ORDER BY nombre").fetchall()
     categorias = db.obtener_categorias(conn)
     subcategorias_json = subcategorias_por_categoria_json(conn)
@@ -1825,7 +1824,7 @@ def compras_importar_factura():
             return redirect(url_for("compras_nueva"))
 
         productos = conn.execute("SELECT * FROM productos ORDER BY nombre").fetchall()
-        proveedores = conn.execute("SELECT * FROM proveedores WHERE activo=1 ORDER BY nombre").fetchall()
+        proveedores = conn.execute("SELECT * FROM proveedores WHERE activo IS TRUE ORDER BY nombre").fetchall()
         categorias = db.obtener_categorias(conn)
         subcategorias_json = subcategorias_por_categoria_json(conn)
         conn.close()
@@ -1837,7 +1836,7 @@ def compras_importar_factura():
             subcategorias_json=subcategorias_json,
         )
 
-    proveedores = conn.execute("SELECT * FROM proveedores WHERE activo=1 ORDER BY nombre").fetchall()
+    proveedores = conn.execute("SELECT * FROM proveedores WHERE activo IS TRUE ORDER BY nombre").fetchall()
     conn.close()
     return render_template("compra_importar_factura.html", proveedores=proveedores)
 
@@ -1858,7 +1857,7 @@ def pedidos_lista():
     # solo cuando se registra la compra) o se desmarque a mano.
     faltantes = conn.execute(
         """SELECT * FROM productos
-           WHERE stock_actual <= stock_minimo AND stock_minimo > 0 AND pedido_pendiente = 0
+           WHERE stock_actual <= stock_minimo AND stock_minimo > 0 AND pedido_pendiente IS FALSE
            ORDER BY nombre"""
     ).fetchall()
 
@@ -1881,7 +1880,7 @@ def pedidos_lista():
             # la ficha del producto, pero solo si sigue activo.
             proveedor = (
                 conn.execute(
-                    "SELECT nombre, email, telefono FROM proveedores WHERE id=? AND activo=1", (f["proveedor_id"],)
+                    "SELECT nombre, email, telefono FROM proveedores WHERE id=%s AND activo IS TRUE", (f["proveedor_id"],)
                 ).fetchone()
                 if f["proveedor_id"] else None
             )
@@ -1919,7 +1918,7 @@ def pedidos_lista():
         grupos[clave]["total_estimado"] += costo_estimado
 
     pendientes = conn.execute(
-        """SELECT * FROM productos WHERE pedido_pendiente = 1 ORDER BY fecha_pedido_pendiente DESC, nombre"""
+        """SELECT * FROM productos WHERE pedido_pendiente IS TRUE ORDER BY fecha_pedido_pendiente DESC, nombre"""
     ).fetchall()
 
     conn.close()
@@ -1941,8 +1940,9 @@ def pedidos_marcar():
         return redirect(url_for("pedidos_lista"))
     conn = db.get_connection()
     hoy = datetime.now().strftime("%Y-%m-%d")
-    conn.executemany(
-        "UPDATE productos SET pedido_pendiente=1, fecha_pedido_pendiente=? WHERE id=?",
+    cur = conn.cursor()
+    cur.executemany(
+        "UPDATE productos SET pedido_pendiente=true, fecha_pedido_pendiente=%s WHERE id=%s",
         [(hoy, pid) for pid in producto_ids],
     )
     conn.commit()
@@ -1955,7 +1955,7 @@ def pedidos_marcar():
 def pedidos_desmarcar(producto_id):
     conn = db.get_connection()
     conn.execute(
-        "UPDATE productos SET pedido_pendiente=0, fecha_pedido_pendiente=NULL WHERE id=?", (producto_id,)
+        "UPDATE productos SET pedido_pendiente=false, fecha_pedido_pendiente=NULL WHERE id=%s", (producto_id,)
     )
     conn.commit()
     conn.close()
