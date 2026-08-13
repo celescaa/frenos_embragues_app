@@ -116,14 +116,14 @@
 <template id="cotizacionTemplate">
   <tr>
     <td>
-      <select name="cotiz_proveedor_id" class="form-select form-select-sm" required>
+      <select name="cotiz_proveedor_id" class="form-select form-select-sm">
         <option value="">-- Elegir proveedor --</option>
         {% for prov in proveedores %}
           <option value="{{ prov.id }}">{{ prov.nombre }}</option>
         {% endfor %}
       </select>
     </td>
-    <td><input type="number" step="0.01" name="cotiz_precio_costo" class="form-control form-control-sm" required></td>
+    <td><input type="number" step="0.01" name="cotiz_precio_costo" class="form-control form-control-sm"></td>
     <td><input type="text" name="cotiz_codigo_proveedor" class="form-control form-control-sm" placeholder="opcional"></td>
     <td><button type="button" class="btn btn-sm btn-outline-danger" onclick="this.closest('tr').remove()"><i class="bi bi-trash"></i></button></td>
   </tr>
@@ -133,14 +133,37 @@
 
 {% block scripts %}
 <script>
+// Esta sección es opcional: se puede guardar un producto sin ninguna cotización.
+// Por eso proveedor y precio NO son required de entrada; lo pasan a ser recién
+// cuando la fila tiene algo cargado (si no, el navegador bloquearía el envío
+// por una fila vacía que el usuario nunca tocó, y ni siquiera llegaría a
+// correr el listener de submit de más abajo, que es el que limpia esas filas).
+function sincronizarObligatoriosCotizacion(fila) {
+  const proveedor = fila.querySelector('select[name="cotiz_proveedor_id"]');
+  const precio = fila.querySelector('input[name="cotiz_precio_costo"]');
+  const codigo = fila.querySelector('input[name="cotiz_codigo_proveedor"]');
+  const tieneAlgoCargado = !!(proveedor.value || precio.value || (codigo && codigo.value.trim()));
+  proveedor.required = tieneAlgoCargado;
+  precio.required = tieneAlgoCargado;
+}
+
 function agregarCotizacion(proveedorId, precio, codigoProveedor) {
   const tpl = document.getElementById('cotizacionTemplate');
   const clone = tpl.content.cloneNode(true);
   if (proveedorId) clone.querySelector('select[name="cotiz_proveedor_id"]').value = proveedorId;
   if (precio) clone.querySelector('input[name="cotiz_precio_costo"]').value = precio;
   if (codigoProveedor) clone.querySelector('input[name="cotiz_codigo_proveedor"]').value = codigoProveedor;
-  document.getElementById('cotizacionesBody').appendChild(clone);
+  const cuerpo = document.getElementById('cotizacionesBody');
+  cuerpo.appendChild(clone);
+  sincronizarObligatoriosCotizacion(cuerpo.lastElementChild);
 }
+
+// Delegado en el tbody para que valga también para las filas que se agregan
+// después (clonadas del template, no existen todavía en este momento).
+document.getElementById('cotizacionesBody').addEventListener('input', function(e) {
+  const fila = e.target.closest('tr');
+  if (fila) sincronizarObligatoriosCotizacion(fila);
+});
 
 const subcategoriasPorCategoria = {{ subcategorias_json|tojson }};
 const subcategoriaActual = {{ (producto.subcategoria if producto and producto.subcategoria else '')|tojson }};

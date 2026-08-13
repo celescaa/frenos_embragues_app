@@ -87,7 +87,7 @@ frenos_embragues_app/
 │   ├── app.py                    # rutas y lógica (el 90% de la aplicación)
 │   ├── database.py               # conexión a Postgres + helpers de consulta/siembra
 │   │                                (el esquema en sí vive en supabase/migrations/)
-│   ├── facturacion_afip.py       # integración AFIP/ARCA (Factura C)
+│   ├── facturacion_afip.py       # integración AFIP/ARCA (Factura A/B)
 │   ├── tienda_pagos.py           # integración Mercado Pago
 │   ├── comprobante_pdf.py        # genera el PDF de un comprobante
 │   ├── envio_mail.py             # envía el comprobante por mail (SMTP)
@@ -177,12 +177,33 @@ Tampoco existe ya `INSTANCE_DIR`/`SI_INSTANCE_DIR` (apuntaba a dónde vivía
 a Postgres, no una carpeta de archivos locales.
 
 ### `core/facturacion_afip.py`
-Emite la Factura C electrónica contra ARCA vía Afip SDK cuando una venta es
-con tarjeta o transferencia. `emitir_factura_c(venta_id)` nunca lanza una
-excepción: si falta el `access_token` o ARCA rechaza el comprobante, guarda
-`facturacion_estado` (`sin_configurar`/`error`/`emitida`) en la venta y
-listo — la venta ya está guardada de antes, nunca se revierte. Se puede
-reintentar manualmente desde el botón en el comprobante.
+Emite la factura electrónica contra ARCA vía Afip SDK cuando una venta es
+con tarjeta o transferencia. El negocio es **Responsable Inscripto**, así
+que el tipo de comprobante lo decide la condición IVA del receptor:
+**Factura A** si el cliente también es Responsable Inscripto con CUIT
+cargado, **Factura B** en cualquier otro caso (Consumidor Final,
+Monotributista, Exento, o sin CUIT/DNI). Nunca Factura C. `datos_receptor()`
+es quien hace ese mapeo (CUIT/DNI + `condicion_iva` del cliente →
+`DocTipo`/`DocNro`/`CondicionIVAReceptorId` + tipo de comprobante), con los
+valores válidos de condición IVA en `CONDICIONES_IVA`. Limitación conocida:
+el sistema no consulta el padrón de AFIP, así que la condición IVA es la que
+alguien cargó a mano en la ficha del cliente — si está mal cargada, la
+factura sale con el tipo equivocado.
+
+La llamada cruda a ARCA está en `_emitir_factura_arca()` (discrimina IVA a
+la tasa general del 21%, `ALICUOTA_IVA`, sobre el total con IVA incluido que
+ya maneja el sistema; no soporta productos con otra alícuota) y no toca
+ninguna tabla. Encima de eso hay dos funciones que sí guardan el resultado:
+`emitir_factura(venta_id)` para una venta y
+`emitir_factura_movimiento(movimiento_id)` para un cargo de cuenta
+corriente. Ninguna lanza una excepción: si falta el `access_token` o ARCA
+rechaza el comprobante, guardan `facturacion_estado`
+(`sin_configurar`/`error`/`emitida`) en la fila correspondiente y listo — la
+venta (o el movimiento) ya está guardada de antes, nunca se revierte. Se
+puede reintentar manualmente desde el botón en el comprobante.
+
+Ver la sección "Facturación electrónica AFIP/ARCA" de `CLAUDE.md` para el
+detalle completo de la regla de negocio y su historial.
 
 ### `core/tienda_pagos.py`
 Arma la "preferencia" de pago de Mercado Pago Checkout Pro para el checkout
@@ -192,7 +213,7 @@ que el cobro online no está disponible (sugiriendo WhatsApp como
 alternativa) en vez de romperse.
 
 ### `core/comprobante_pdf.py`
-Genera el PDF de un comprobante de venta (remito/recibo/Factura C) para
+Genera el PDF de un comprobante de venta (remito/recibo/Factura A o B) para
 adjuntarlo en el mail al cliente. Usa **xhtml2pdf** en vez de
 WeasyPrint/wkhtmltopdf a propósito — es 100% Python, no requiere instalar
 librerías de sistema en la compu de quien lo corra. Renderiza su propia
@@ -233,13 +254,13 @@ si se va a tocar este esquema: las columnas de plata son `NUMERIC(12,2)`
 
 | Tabla | Para qué |
 |---|---|
-| `clientes` | Datos de contacto + CUIT/DNI (para la Factura C) |
+| `clientes` | Datos de contacto + CUIT/DNI y `condicion_iva` (deciden si corresponde Factura A o B) |
 | `proveedores` | Datos de contacto + `activo` (soft-delete, no se borran si tienen historial) |
 | `categorias` | Categorías de producto, editables desde `/categorias` |
 | `subcategorias` | Subcategorías, cada una atada a una única categoría padre (`categoria_id` FK) — jerarquía estricta, editables desde `/categorias` |
 | `productos` | Catálogo: precio costo/venta, stock actual/mínimo, categoría, subcategoría (texto libre, no FK — igual que categoría), proveedor, imagen, código de barras |
 | `producto_proveedor` | Cotización de un producto por proveedor (para el comparador de precios) |
-| `ventas` / `venta_items` | Una venta (local o tienda online) y sus líneas. Incluye los campos de Factura C (`cae`, `cae_vencimiento`, etc.) |
+| `ventas` / `venta_items` | Una venta (local o tienda online) y sus líneas. Incluye los campos de facturación electrónica (`cae`, `cae_vencimiento`, `tipo_comprobante`, `imp_neto`, `imp_iva`, etc.) |
 | `compras` / `compra_items` | Una compra a un proveedor y sus líneas — repone stock y actualiza costo |
 | `pedidos_web` / `pedido_web_items` | Carrito "en tránsito" de la tienda online mientras se espera la confirmación del pago (no es un segundo inventario, ver §1) |
 | `usuarios` | Login: hash de contraseña, rol (`admin`/`empleado`), bloqueo por intentos fallidos |
@@ -261,6 +282,8 @@ de `scripts/`), por ejemplo: `python scripts/importar_datos.py`.
 | `limpiar_lista_proveedor.py` | Toma el Excel crudo de un proveedor (formato propio de cada uno, vía un "adaptador") y deja solo lo relevante a frenos/embragues con precio de venta sugerido | `python scripts/limpiar_lista_proveedor.py [carpeta] [salida.xlsx]` |
 | `generar_planilla_stock_proveedores.py` | Genera una planilla en blanco (una hoja por proveedor) para que alguien del negocio cargue a mano el stock real | `python scripts/generar_planilla_stock_proveedores.py [salida.xlsx]` |
 | `cargar_stock_por_proveedor.py` | Importa esa planilla ya completada — "Cantidad en stock" reemplaza el stock actual (no lo suma) | `python scripts/cargar_stock_por_proveedor.py [archivo.xlsx]` |
+| `extraer_catalogo_referencia.py` | Separa de esa misma planilla las hojas que en realidad son la lista de precios completa de un proveedor (no stock real) y arma un catálogo de referencia solo con costos. No toca la base | `python scripts/extraer_catalogo_referencia.py <entrada.xlsx> [salida.xlsx]` |
+| `matchear_productos_proveedores.py` | Puebla `producto_proveedor` matcheando las listas de precios de varios proveedores contra el catálogo ya cargado (código de barras exacto, con fallback por similitud de texto). Corre en simulación salvo que se pase `--aplicar` | `python scripts/matchear_productos_proveedores.py <archivo.xlsx> [--categoria X] [--subcategoria Y] [--umbral 0.6] [--aplicar]` |
 | `archivo/cargar_ejemplo_proveedores.py` | **Archivado**, ya cumplió su función (piloto de carga que después se borró). Se conserva solo de referencia. **No portado a Postgres** (Tarea 12 de la migración lo dejó a propósito en dialecto SQLite — `sqlite3`, `lastrowid`, `PRAGMA` — por ser código retirado): no corre contra la base actual, ver el aviso en el propio archivo | — |
 
 Los scripts que necesitan la base agregan la carpeta raíz del proyecto a
@@ -354,14 +377,17 @@ en la sección "Dockerización" de `CLAUDE.md`.
 - Cambio de contraseña obligatorio en el primer ingreso.
 - `app.secret_key` generada al azar, guardada fuera del código.
 - Toda ruta requiere sesión iniciada por defecto (antes visto en `core/app.py`, §4).
+- Protección CSRF (`Flask-WTF`) en todos los formularios y en los 3 `fetch()`
+  de alta rápida (clientes/productos). La única excepción es el webhook de
+  Mercado Pago, que es server-to-server y no lleva sesión de navegador. Un
+  token vencido o inválido muestra un mensaje en español, no una página
+  técnica de error.
 
 Pendiente (ver CLAUDE.md, sección "Seguridad", para el detalle actualizado
-y el orden de prioridad — esta lista puede haber quedado desactualizada en
-algún punto además del que sigue, revisar la fuente): HTTPS +
-`SESSION_COOKIE_SECURE` cuando el sistema quede expuesto a internet, 2FA.
-Backups: con Postgres/Supabase (ver §1) esto cambia respecto a cuando el
-dato vivía en `data.db` — en producción los maneja Supabase según el plan
-contratado, ver el detalle en `CLAUDE.md`.
+y el orden de prioridad): HTTPS + `SESSION_COOKIE_SECURE` cuando el sistema
+quede expuesto a internet, 2FA. Backups: con Postgres/Supabase (ver §1) esto
+cambia respecto a cuando el dato vivía en `data.db` — en producción los
+maneja Supabase según el plan contratado, ver el detalle en `CLAUDE.md`.
 
 ## 11. Integraciones externas — estado
 

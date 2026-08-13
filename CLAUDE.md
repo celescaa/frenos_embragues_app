@@ -692,6 +692,71 @@ Agregado después:
     correctamente, dos ventas con el mismo `id_operacion` se contaron como
     una sola operación en `/ventas/dia`, y un movimiento de stock sin
     factura sumó el stock esperado.
+- **No se podía guardar un producto sin cotizaciones de proveedor
+  (13/08/2026)**: bug viejo (anterior a todo lo de arriba) en
+  `templates/producto_form.html`, encontrado en QA manual. Al abrir
+  `/productos/nuevo` —o editar cualquier producto sin filas en
+  `producto_proveedor`— el JS agregaba una fila vacía en "Precios por
+  proveedor", cuyos campos proveedor y precio eran `required`. Como esa
+  sección es **opcional**, el usuario apretaba Guardar y no pasaba nada:
+  cero POST al servidor, sin error visible (en el navegador aparece el
+  globito nativo "Selecciona un elemento de la lista" apuntando a una fila
+  fácil de no ver).
+  - **Gotcha general, vale para cualquier template que copie este patrón**:
+    la validación nativa de HTML5 corre **antes** de que se dispare el
+    evento `submit`. O sea, un listener de `submit` nunca ve un formulario
+    inválido. Acá había justamente un listener que limpiaba las filas
+    vacías, con el comentario explicando que servía para "la fila vacía
+    inicial" — pero era código muerto exactamente en el caso que venía a
+    resolver, porque el navegador cancelaba el envío antes.
+  - **Causa raíz real**: el `required` incondicional en una sección
+    opcional, no la fila auto-agregada (esa solo hace que el bug se
+    dispare sin que el usuario toque nada). Ojo con la diferencia:
+    `venta_form.html`, `compra_form.html` y `cuenta_corriente.html` también
+    agregan una fila sola al cargar y también la tienen `required`, pero
+    ahí está **bien** — esas secciones son obligatorias (una venta necesita
+    al menos un producto) y sus listeners de `submit` son chequeos
+    *adicionales* que corren después de que la validación nativa pasó. No
+    copiar el arreglo de acá a esos templates.
+  - **Arreglo**: se sacó el `required` estático del `<template>` de fila y
+    se hizo condicional (`sincronizarObligatoriosCotizacion()`), vía un
+    listener delegado en el `tbody` para que valga también para las filas
+    clonadas después: proveedor y precio pasan a ser obligatorios recién
+    cuando la fila tiene algo cargado. Así el listener de limpieza que ya
+    existía queda alcanzable y hace lo que decía su comentario. No hizo
+    falta `novalidate`, el resto del formulario conserva la validación
+    nativa.
+  - Probado en navegador real (Flask + Playwright, contra una base
+    descartable, sin tocar `data.db`): producto nuevo con la sección sin
+    tocar guarda y no crea cotizaciones espurias; fila a medio llenar
+    (proveedor sin precio) sigue bloqueada señalando el campo que falta;
+    fila completa guarda precio y código bien; editar un producto con
+    cotizaciones las deja obligatorias y guarda igual; apretar "Agregar
+    proveedor" y arrepentirse guarda descartando la fila vacía y
+    conservando la cotización real; y cargar solo el código del proveedor
+    bloquea en vez de descartar en silencio lo tipeado.
+  - **Este bug no lo hubiera agarrado ningún test de los que hay**: es JS
+    puro del lado del cliente y, cuando falla, no hay request al servidor
+    que testear. Si algún día se suma una suite a nivel navegador, este es
+    un caso para incluir.
+  - **PENDIENTE — el mismo bug está vivo en
+    `templates/compra_revisar_factura.html`** (encontrado buscando si el
+    patrón se repetía; todavía **sin arreglar**, se dejó anotado en vez de
+    tocarlo en la misma tanda). Ahí el listener de `submit` desactiva
+    (`disabled = true`) los campos de las filas destildadas, con el mismo
+    problema de fondo: corre después de la validación nativa, así que
+    nunca llega a ejecutarse. Y acá pega en uso real, no en un caso raro:
+    una línea que el importador no pudo matchear arranca **destildada a
+    propósito** (`{{ "checked" if f.confianza != "sin_match" }}`) y con el
+    buscador de producto **vacío pero `required`** — o sea, cualquier
+    factura con al menos una línea sin match deja la pantalla de revisión
+    imposible de confirmar, ni siquiera destildando todo. Reproducido con
+    un Excel sintético de 2 líneas que no matchean: `checkValidity()` da
+    `false` por los dos `.producto-buscar`, y el click en "Confirmar
+    compra" no genera ningún POST. El arreglo natural es el mismo criterio
+    que se usó acá (que `required` valga solo para las filas tildadas,
+    sincronizándolo cuando se tilda/destilda el check "Cargar", en vez de
+    depender del `disabled` dentro del `submit`).
 
 ## Migración a Postgres (13/08/2026) — Plan 1 de 2
 
