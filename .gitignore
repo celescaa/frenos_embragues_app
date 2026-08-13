@@ -31,3 +31,7 @@ plantillas/Plantilla_Carga_Datos.xlsx
 # Python
 __pycache__/
 *.pyc
+
+# Artefactos locales de la CLI de Supabase (la base local vive en Docker)
+supabase/.temp/
+supabase/.branches/
