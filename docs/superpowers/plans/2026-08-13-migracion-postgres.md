@@ -27,6 +27,22 @@ Estas reglas aplican a **todas** las tareas de port de consultas. No se repiten 
 | `date('now')` | `CURRENT_DATE` |
 | `sqlite3.IntegrityError` | `psycopg.errors.UniqueViolation` / `psycopg.errors.ForeignKeyViolation` |
 | `PRAGMA foreign_keys = ON` | se elimina (Postgres siempre aplica las FK) |
+| `GROUP BY <columna cualquiera>` | `GROUP BY <clave primaria de la tabla del SELECT>` |
+| `HAVING <alias del SELECT>` | `HAVING <la expresión completa repetida>` |
+
+**Postgres es estricto con `GROUP BY` y `HAVING`, SQLite no** (descubierto
+durante la Tarea 8, no estaba previsto en este plan). Dos diferencias que
+**rompen la consulta entera**, no son casos borde:
+
+- **Dependencia funcional en `GROUP BY`:** si el `SELECT` trae `p.nombre`, hay
+  que agrupar por `p.id` (la clave primaria de *esa* tabla), no por
+  `vi.producto_id`. Postgres solo deduce la dependencia a través de la clave
+  primaria de la tabla a la que pertenece la columna.
+- **`HAVING` no ve los alias del `SELECT`:** `HAVING saldo > 0` no funciona;
+  hay que repetir la expresión completa (`HAVING COALESCE(SUM(...), 0) > 0`).
+
+Estos errores fallan ruidosamente al ejecutar la consulta, así que un test de
+ruta los caza — pero solo si existe ese test.
 
 **Reglas de trabajo:**
 
