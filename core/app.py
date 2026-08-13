@@ -1309,10 +1309,10 @@ def ventas_dia():
     fecha = request.args.get("fecha", "").strip() or datetime.now().strftime("%Y-%m-%d")
     medio_pago = request.args.get("medio_pago", "").strip()
 
-    condiciones = ["fecha = ?"]
+    condiciones = ["fecha = %s"]
     parametros = [fecha]
     if medio_pago:
-        condiciones.append("metodo_pago = ?")
+        condiciones.append("metodo_pago = %s")
         parametros.append(medio_pago)
     where = " AND ".join(condiciones)
 
@@ -1327,7 +1327,7 @@ def ventas_dia():
     # id_operacion (un mismo pago dividido en efectivo + tarjeta, por
     # ejemplo) cuentan como una sola, no dos.
     cant_operaciones = conn.execute(
-        f"SELECT COUNT(DISTINCT COALESCE(id_operacion, 'v' || id)) AS c FROM ventas WHERE {where}",
+        f"SELECT COUNT(DISTINCT COALESCE(id_operacion, 'v' || id::text)) AS c FROM ventas WHERE {where}",
         parametros,
     ).fetchone()["c"]
 
@@ -1354,7 +1354,7 @@ def _promociones_vigentes_cliente(conn, cliente_id):
     hoy = datetime.now().strftime("%Y-%m-%d")
     return conn.execute(
         """SELECT * FROM promociones_aplicadas
-           WHERE cliente_id=? AND fecha_inicio<=? AND (fecha_fin IS NULL OR fecha_fin>=?)""",
+           WHERE cliente_id=%s AND fecha_inicio<=%s AND (fecha_fin IS NULL OR fecha_fin>=%s)""",
         (cliente_id, hoy, hoy),
     ).fetchall()
 
@@ -1376,23 +1376,26 @@ def aplicar_promociones(conn, cliente_id, items):
     for promo in promos:
         if promo["alcance"] == "productos_puntuales":
             for f in conn.execute(
-                "SELECT producto_id FROM promocion_productos WHERE promocion_id=?", (promo["id"],)
+                "SELECT producto_id FROM promocion_productos WHERE promocion_id=%s", (promo["id"],)
             ):
                 productos_con_promo_puntual.setdefault(f["producto_id"], []).append(promo)
 
     nuevos = []
     for producto_id, cant, precio_unitario, subtotal in items:
         aplicables = [p for p in promos if p["alcance"] == "todo"] + productos_con_promo_puntual.get(producto_id, [])
-        porcentaje = max([p["porcentaje_o_monto"] for p in aplicables if p["tipo"] == "porcentaje"], default=0)
+        porcentaje = max(
+            [p["porcentaje_o_monto"] for p in aplicables if p["tipo"] == "porcentaje"], default=Decimal("0")
+        )
         precio_final = round(precio_unitario * (1 - porcentaje / 100), 2) if porcentaje else precio_unitario
         nuevos.append((producto_id, cant, precio_final, round(cant * precio_final, 2)))
 
     monto_fijo = max(
-        [p["porcentaje_o_monto"] for p in promos if p["tipo"] == "monto_fijo" and p["alcance"] == "todo"], default=0
+        [p["porcentaje_o_monto"] for p in promos if p["tipo"] == "monto_fijo" and p["alcance"] == "todo"],
+        default=Decimal("0"),
     )
     total_previo = sum(it[3] for it in nuevos)
     if monto_fijo and total_previo > 0:
-        factor = max(0, total_previo - monto_fijo) / total_previo
+        factor = max(Decimal("0"), total_previo - monto_fijo) / total_previo
         nuevos = [
             (pid, cant, round(pu * factor, 2), round(cant * pu * factor, 2))
             for pid, cant, pu, _ in nuevos
@@ -1427,7 +1430,7 @@ def registrar_venta(conn, cliente_id, metodo_pago, items, tipo_comprobante_solic
 
     total = sum(it[3] for it in items)
     if metodo_pago in ("Tarjeta", "Transferencia", "Mercado Pago"):
-        cliente = conn.execute("SELECT cuit_dni, condicion_iva FROM clientes WHERE id=?", (cliente_id,)).fetchone() if cliente_id else None
+        cliente = conn.execute("SELECT cuit_dni, condicion_iva FROM clientes WHERE id=%s", (cliente_id,)).fetchone() if cliente_id else None
         receptor = facturacion_afip.datos_receptor(
             cliente["cuit_dni"] if cliente else None, cliente["condicion_iva"] if cliente else None
         )
@@ -1441,16 +1444,16 @@ def registrar_venta(conn, cliente_id, metodo_pago, items, tipo_comprobante_solic
     cur = conn.cursor()
     cur.execute(
         """INSERT INTO ventas (fecha, cliente_id, total, metodo_pago, tipo_comprobante, numero_comprobante, id_operacion)
-           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+           VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id""",
         (datetime.now().strftime("%Y-%m-%d"), cliente_id, total, metodo_pago, tipo_comprobante, numero_comprobante, id_operacion),
     )
-    venta_id = cur.lastrowid
+    venta_id = cur.fetchone()["id"]
     for producto_id, cant, precio_unitario, subtotal in items:
         cur.execute(
-            "INSERT INTO venta_items (venta_id, producto_id, cantidad, precio_unitario, subtotal) VALUES (?, ?, ?, ?, ?)",
+            "INSERT INTO venta_items (venta_id, producto_id, cantidad, precio_unitario, subtotal) VALUES (%s, %s, %s, %s, %s)",
             (venta_id, producto_id, cant, precio_unitario, subtotal),
         )
-        cur.execute("UPDATE productos SET stock_actual = stock_actual - ? WHERE id = ?", (cant, producto_id))
+        cur.execute("UPDATE productos SET stock_actual = stock_actual - %s WHERE id = %s", (cant, producto_id))
     conn.commit()
     return venta_id, tipo_comprobante
 
@@ -1474,7 +1477,7 @@ def ventas_nueva():
             cant = int(cant)
             if cant <= 0:
                 continue
-            producto = conn.execute("SELECT * FROM productos WHERE id=?", (pid,)).fetchone()
+            producto = conn.execute("SELECT * FROM productos WHERE id=%s", (pid,)).fetchone()
             if not producto:
                 continue
             subtotal = cant * producto["precio_venta"]
@@ -1608,12 +1611,12 @@ def _obtener_venta_y_items(conn, venta_id):
         """SELECT v.*, c.nombre AS cliente_nombre, c.telefono AS cliente_telefono,
                   c.direccion AS cliente_direccion, c.cuit_dni AS cliente_cuit,
                   c.condicion_iva AS cliente_condicion_iva, c.email AS cliente_email
-           FROM ventas v LEFT JOIN clientes c ON c.id = v.cliente_id WHERE v.id=?""",
+           FROM ventas v LEFT JOIN clientes c ON c.id = v.cliente_id WHERE v.id=%s""",
         (venta_id,),
     ).fetchone()
     items = conn.execute(
         """SELECT vi.*, p.nombre AS producto_nombre, p.codigo AS producto_codigo
-           FROM venta_items vi JOIN productos p ON p.id = vi.producto_id WHERE vi.venta_id=?""",
+           FROM venta_items vi JOIN productos p ON p.id = vi.producto_id WHERE vi.venta_id=%s""",
         (venta_id,),
     ).fetchall()
     return venta, items
@@ -1656,7 +1659,7 @@ def ventas_enviar_mail(venta_id):
 def ventas_facturar(venta_id):
     """Reintento manual de la Factura A/B (por ejemplo si ARCA no respondió antes)."""
     conn = db.get_connection()
-    venta = conn.execute("SELECT * FROM ventas WHERE id=?", (venta_id,)).fetchone()
+    venta = conn.execute("SELECT * FROM ventas WHERE id=%s", (venta_id,)).fetchone()
     conn.close()
     if not venta:
         flash("No encontré esa venta.", "danger")
@@ -1665,7 +1668,7 @@ def ventas_facturar(venta_id):
     facturacion_afip.emitir_factura(venta_id)
 
     conn = db.get_connection()
-    estado = conn.execute("SELECT facturacion_estado, facturacion_error FROM ventas WHERE id=?", (venta_id,)).fetchone()
+    estado = conn.execute("SELECT facturacion_estado, facturacion_error FROM ventas WHERE id=%s", (venta_id,)).fetchone()
     conn.close()
     if estado["facturacion_estado"] == "emitida":
         flash("Factura emitida correctamente.", "success")
