@@ -318,6 +318,22 @@ def a_decimal(valor):
     return Decimal(str(valor or 0))
 
 
+def a_entero(valor, default=None):
+    """Convierte un valor de formulario a int para una columna INTEGER (un id,
+    una cantidad), o devuelve `default` si no es un número.
+
+    Hace falta porque Postgres es estricto donde SQLite era permisivo: con
+    SQLite, `WHERE id = 'abc'` no matcheaba nada y la app seguía por la rama
+    de "no existe"; Postgres aborta la consulta con
+    `invalid input syntax for type integer` y la ruta termina en un 500. Sin
+    esto, cualquiera puede romper `/tienda/carrito/*` (pública, sin login)
+    posteando un id que no sea un número."""
+    try:
+        return int(str(valor).strip())
+    except (TypeError, ValueError):
+        return default
+
+
 def guardar_imagen_producto(producto_id, file_storage):
     """Guarda la foto subida para un producto y devuelve el nombre de archivo
     a guardar en productos.imagen, o None si no se subió nada válido."""
@@ -1981,11 +1997,8 @@ def stock_no_facturado():
         tipo = request.form.get("tipo", "compra")
         if tipo not in ("compra", "venta"):
             tipo = "compra"
-        producto_id = request.form.get("producto_id")
-        try:
-            cantidad = int(request.form.get("cantidad") or 0)
-        except ValueError:
-            cantidad = 0
+        producto_id = a_entero(request.form.get("producto_id"))
+        cantidad = a_entero(request.form.get("cantidad"), 0) or 0
         try:
             precio = a_decimal(request.form.get("precio"))
         except InvalidOperation:
@@ -1993,7 +2006,11 @@ def stock_no_facturado():
         contraparte = request.form.get("contraparte", "").strip() or None
         observaciones = request.form.get("observaciones", "").strip() or None
 
-        producto = conn.execute("SELECT * FROM productos WHERE id=%s", (producto_id,)).fetchone() if producto_id else None
+        producto = (
+            conn.execute("SELECT * FROM productos WHERE id=%s", (producto_id,)).fetchone()
+            if producto_id is not None
+            else None
+        )
         if not producto or cantidad <= 0:
             flash("Elegí un producto válido (de la lista) y una cantidad mayor a cero.", "danger")
             conn.close()
@@ -2172,7 +2189,14 @@ def _carrito_detalle(conn):
     items = []
     total = 0
     for producto_id_str, cantidad in carrito.items():
-        producto = conn.execute("SELECT * FROM productos WHERE id=%s", (int(producto_id_str),)).fetchone()
+        # Las rutas del carrito ya normalizan la clave a str(int), pero se
+        # revalida acá: una sesión abierta antes de esa corrección puede
+        # traer una clave que no sea un número, y reventar el carrito y el
+        # checkout de ese visitante hasta que borre la cookie.
+        producto_id = a_entero(producto_id_str)
+        if producto_id is None:
+            continue
+        producto = conn.execute("SELECT * FROM productos WHERE id=%s", (producto_id,)).fetchone()
         if not producto:
             continue
         # nunca dejamos pedir más de lo que hay disponible ahora mismo
@@ -2279,8 +2303,11 @@ def tienda_catalogo():
 
 @app.route("/tienda/carrito/agregar", methods=["POST"])
 def tienda_carrito_agregar():
-    producto_id = request.form.get("producto_id")
-    cantidad = int(request.form.get("cantidad", 1) or 1)
+    producto_id = a_entero(request.form.get("producto_id"))
+    cantidad = a_entero(request.form.get("cantidad"), 1) or 1
+    if producto_id is None:
+        flash("Ese producto no está disponible.", "danger")
+        return redirect(url_for("tienda_catalogo"))
     conn = db.get_connection()
     producto = conn.execute("SELECT * FROM productos WHERE id=%s", (producto_id,)).fetchone()
     conn.close()
@@ -2288,9 +2315,13 @@ def tienda_carrito_agregar():
         flash("Ese producto no está disponible.", "danger")
         return redirect(url_for("tienda_catalogo"))
 
+    # La clave del carrito se normaliza a str(int): así "5" y "05" son el
+    # mismo renglón y no dos, y nunca entra a la sesión algo que después
+    # `_carrito_detalle()` no pueda convertir.
+    clave = str(producto_id)
     carrito = _carrito()
-    actual = carrito.get(producto_id, 0)
-    carrito[producto_id] = min(actual + cantidad, producto["stock_actual"])
+    actual = carrito.get(clave, 0)
+    carrito[clave] = min(actual + cantidad, producto["stock_actual"])
     session.modified = True
     flash(f"Agregado: {producto['nombre']}.", "success")
     return redirect(request.referrer or url_for("tienda_catalogo"))
@@ -2298,22 +2329,24 @@ def tienda_carrito_agregar():
 
 @app.route("/tienda/carrito/quitar", methods=["POST"])
 def tienda_carrito_quitar():
-    producto_id = request.form.get("producto_id")
+    producto_id = a_entero(request.form.get("producto_id"))
     carrito = _carrito()
-    carrito.pop(producto_id, None)
+    if producto_id is not None:
+        carrito.pop(str(producto_id), None)
     session.modified = True
     return redirect(url_for("tienda_carrito"))
 
 
 @app.route("/tienda/carrito/actualizar", methods=["POST"])
 def tienda_carrito_actualizar():
-    producto_id = request.form.get("producto_id")
-    cantidad = int(request.form.get("cantidad", 0) or 0)
+    producto_id = a_entero(request.form.get("producto_id"))
+    cantidad = a_entero(request.form.get("cantidad"), 0) or 0
     carrito = _carrito()
-    if cantidad <= 0:
-        carrito.pop(producto_id, None)
-    else:
-        carrito[producto_id] = cantidad
+    if producto_id is not None:
+        if cantidad <= 0:
+            carrito.pop(str(producto_id), None)
+        else:
+            carrito[str(producto_id)] = cantidad
     session.modified = True
     return redirect(url_for("tienda_carrito"))
 

@@ -734,6 +734,21 @@ Qué cambió, para quien conocía el sistema por su versión en SQLite:
   ya era case-insensitive para ASCII; en Postgres no, así que un `LIKE`
   suelto en una búsqueda es un buscador roto en silencio para cualquier
   texto con mayúsculas.
+- **Un id que viene de un formulario pasa por `a_entero()`** (helper en
+  `core/app.py`, hermano de `a_decimal()`). Postgres es estricto donde
+  SQLite era permisivo: `WHERE id = 'abc'` en SQLite no matcheaba nada y la
+  app seguía por la rama de "no existe", mientras que Postgres aborta la
+  consulta (`invalid input syntax for type integer`) y la ruta termina en un
+  500. Sin esto, cualquiera puede romper `/tienda/carrito/*` —que es pública
+  y sin login— posteando un `producto_id` que no sea un número. Las claves
+  del carrito en sesión se normalizan a `str(int)` por el mismo motivo: una
+  clave inválida guardada ahí rompía el carrito y el checkout de ese
+  visitante hasta que borrara la cookie. Cubierto por
+  `tests/test_entradas_invalidas.py`.
+  Ojo: esto **no** aplica a los campos numéricos de negocio (stock, cantidad
+  en la ficha de producto), que siguen con `int()` a propósito — ahí un valor
+  inválido tiene que fallar, no convertirse en 0 en silencio y guardar un
+  stock equivocado.
 
 ### Desarrollo local
 
