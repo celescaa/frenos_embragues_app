@@ -1,6 +1,7 @@
 """El buscador es lo más frágil de la migración: en SQLite LIKE no distingue
 mayúsculas, en Postgres sí. Si alguien olvida un ILIKE, el buscador deja de
 encontrar cosas sin lanzar ningún error."""
+from decimal import Decimal
 import pytest
 from core.app import app as flask_app
 
@@ -62,3 +63,25 @@ def test_codigo_duplicado_da_mensaje_claro_y_no_rompe(client, db_conn):
         "precio_costo": "100", "precio_venta": "130",
     })
     assert respuesta.status_code < 500
+
+
+def test_precio_se_guarda_como_decimal_exacto(client, db_conn):
+    """precio_costo/precio_venta son NUMERIC(12,2): si alguien vuelve a
+    convertirlos con float() en vez de Decimal, este valor delata el
+    problema (float("1234.56") no es exactamente Decimal("1234.56") en
+    memoria, aunque Postgres redondee igual al guardarlo)."""
+    respuesta = client.post("/productos/nuevo", data={
+        "nombre": "Producto con decimales",
+        "categoria": "Frenos",
+        "precio_costo": "1234.56",
+        "precio_venta": "2345.67",
+    })
+    assert respuesta.status_code < 400
+    fila = db_conn.execute(
+        "SELECT precio_costo, precio_venta FROM productos WHERE nombre = %s",
+        ("Producto con decimales",),
+    ).fetchone()
+    assert fila is not None
+    assert fila["precio_costo"] == Decimal("1234.56")
+    assert fila["precio_venta"] == Decimal("2345.67")
+    assert isinstance(fila["precio_costo"], Decimal)

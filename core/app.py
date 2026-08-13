@@ -11,6 +11,7 @@ import os
 import secrets
 import sqlite3
 import psycopg
+from decimal import Decimal
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, session
 from flask_wtf import CSRFProtect
 from flask_wtf.csrf import CSRFError
@@ -300,6 +301,19 @@ app.jinja_env.filters["money"] = money
 EXTENSIONES_IMAGEN_PERMITIDAS = {"jpg", "jpeg", "png", "webp"}
 CARPETA_IMAGENES_PRODUCTOS = os.path.join(PROJECT_ROOT, "static", "img", "productos")
 os.makedirs(CARPETA_IMAGENES_PRODUCTOS, exist_ok=True)
+
+
+def a_decimal(valor):
+    """Convierte un valor de formulario a Decimal para una columna de plata
+    (NUMERIC en Postgres). Nunca usar float() acá: mezclar Decimal con
+    float en una cuenta más adelante lanza TypeError, y float ya venía
+    acumulando error de redondeo desde antes de esta migración.
+
+    Mismo criterio que el `or 0` que ya usaba cada sitio: valor ausente o
+    vacío da Decimal("0"). No se le suma tolerancia a formatos nuevos (por
+    ejemplo coma decimal) — un valor inválido tiene que fallar igual que
+    fallaba antes con float(), no silenciarse acá."""
+    return Decimal(str(valor or 0))
 
 
 def guardar_imagen_producto(producto_id, file_storage):
@@ -851,7 +865,7 @@ def guardar_cotizaciones_proveedor(conn, producto_id, form):
         conn.execute(
             """INSERT INTO producto_proveedor (producto_id, proveedor_id, precio_costo, codigo_proveedor)
                VALUES (%s, %s, %s, %s)""",
-            (producto_id, proveedor_id, float(precio), (codigo_prov or "").strip() or None),
+            (producto_id, proveedor_id, a_decimal(precio), (codigo_prov or "").strip() or None),
         )
 
 
@@ -913,8 +927,8 @@ def productos_nuevo():
                 request.form.get("subcategoria") or None,
                 request.form.get("marca", ""),
                 request.form.get("modelo_compatible", ""),
-                float(request.form.get("precio_costo") or 0),
-                float(request.form.get("precio_venta") or 0),
+                a_decimal(request.form.get("precio_costo")),
+                a_decimal(request.form.get("precio_venta")),
                 int(request.form.get("stock_actual") or 0),
                 int(request.form.get("stock_minimo") or 2),
                 request.form.get("proveedor_id") or None,
@@ -957,8 +971,8 @@ def productos_editar(producto_id):
                 request.form.get("subcategoria") or None,
                 request.form.get("marca", ""),
                 request.form.get("modelo_compatible", ""),
-                float(request.form.get("precio_costo") or 0),
-                float(request.form.get("precio_venta") or 0),
+                a_decimal(request.form.get("precio_costo")),
+                a_decimal(request.form.get("precio_venta")),
                 int(request.form.get("stock_actual") or 0),
                 int(request.form.get("stock_minimo") or 2),
                 request.form.get("proveedor_id") or None,
@@ -1535,8 +1549,8 @@ def api_productos_nuevo():
         categoria = "Otros"
     subcategoria = request.form.get("subcategoria", "").strip() or None
     marca = request.form.get("marca", "").strip() or None
-    precio_costo = float(request.form.get("precio_costo") or 0)
-    precio_venta = float(request.form.get("precio_venta") or 0)
+    precio_costo = a_decimal(request.form.get("precio_costo"))
+    precio_venta = a_decimal(request.form.get("precio_venta"))
     stock_minimo = int(request.form.get("stock_minimo") or 2)
     proveedor_id = request.form.get("proveedor_id") or None
 
