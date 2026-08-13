@@ -1,28 +1,15 @@
 """
-Esquema e inicialización de la base de datos SQLite para el sistema de
+Esquema e inicialización de la base de datos Postgres para el sistema de
 gestión de ventas de frenos y embragues.
 """
-import sqlite3
+import psycopg
+from psycopg.rows import dict_row
 import os
 import secrets
 import string
 from datetime import datetime, timedelta
 import random
 from werkzeug.security import generate_password_hash
-
-# Carpeta donde viven los datos que tienen que sobrevivir a un redeploy
-# (base de datos, credenciales iniciales, clave de sesión). Por defecto es la
-# raíz del proyecto (un nivel arriba de core/, donde vivía data.db antes de
-# que este archivo se mudara a core/ — comportamiento de siempre corriendo
-# local). En Docker se pisa con SI_INSTANCE_DIR apuntando a un volumen
-# montado, para no perder nada cuando se recrea el contenedor (ver
-# Dockerfile/docker-compose.yml).
-_RAIZ_PROYECTO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-INSTANCE_DIR = os.environ.get("SI_INSTANCE_DIR") or _RAIZ_PROYECTO
-os.makedirs(INSTANCE_DIR, exist_ok=True)
-
-DB_PATH = os.path.join(INSTANCE_DIR, "data.db")
-CREDENCIALES_PATH = os.path.join(INSTANCE_DIR, "credenciales_iniciales.txt")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS clientes (
@@ -255,12 +242,31 @@ CREATE TABLE IF NOT EXISTS promocion_productos (
 );
 """
 
+# Cadena de conexión. En desarrollo apunta al Postgres local que levanta
+# `npx supabase start`; en producción, al pooler de Supabase.
+DATABASE_URL = os.environ.get(
+    "DATABASE_URL",
+    "postgresql://postgres:postgres@127.0.0.1:54322/postgres",
+)
+
 
 def get_connection():
-    conn = sqlite3.connect(DB_PATH)
-    conn.row_factory = sqlite3.Row
-    conn.execute("PRAGMA foreign_keys = ON")
-    return conn
+    """Conexión a Postgres.
+
+    dict_row: las filas se acceden por nombre (venta["fecha"]), igual que con
+    sqlite3.Row — por eso ningún template necesitó cambiar.
+
+    prepare_threshold=None: OBLIGATORIO. En producción esto sale por el pooler
+    de Supabase en modo transacción, que NO soporta prepared statements, y
+    psycopg los activa solo a partir de la quinta ejecución de una consulta.
+    Sin esta línea el sistema funciona al principio y empieza a fallar
+    después, que es de los bugs más difíciles de diagnosticar.
+    """
+    return psycopg.connect(
+        DATABASE_URL,
+        row_factory=dict_row,
+        prepare_threshold=None,
+    )
 
 
 # Categorías del catálogo (local y tienda online). Ya NO es la lista fija:
