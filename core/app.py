@@ -10,7 +10,7 @@ sistema).
 import os
 import secrets
 import psycopg
-from decimal import Decimal
+from decimal import Decimal, InvalidOperation
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, session
 from flask_wtf import CSRFProtect
 from flask_wtf.csrf import CSRFError
@@ -541,14 +541,14 @@ def clientes_eliminar(cliente_id):
 @app.route("/clientes/<int:cliente_id>/cuenta-corriente")
 def cuenta_corriente_ver(cliente_id):
     conn = db.get_connection()
-    cliente = conn.execute("SELECT * FROM clientes WHERE id=?", (cliente_id,)).fetchone()
+    cliente = conn.execute("SELECT * FROM clientes WHERE id=%s", (cliente_id,)).fetchone()
     if not cliente:
         conn.close()
         flash("No encontré ese cliente.", "danger")
         return redirect(url_for("clientes_lista"))
     movimientos = conn.execute(
         """SELECT * FROM cuenta_corriente_movimientos
-           WHERE cliente_id=? ORDER BY fecha DESC, id DESC""",
+           WHERE cliente_id=%s ORDER BY fecha DESC, id DESC""",
         (cliente_id,),
     ).fetchall()
     movimientos = [dict(m) for m in movimientos]
@@ -559,7 +559,7 @@ def cuenta_corriente_ver(cliente_id):
         m["renglones"] = conn.execute(
             """SELECT i.*, p.nombre AS producto_nombre, p.codigo AS producto_codigo
                FROM cuenta_corriente_movimiento_items i JOIN productos p ON p.id = i.producto_id
-               WHERE i.movimiento_id=?""",
+               WHERE i.movimiento_id=%s""",
             (m["id"],),
         ).fetchall()
     saldo = sum(m["monto"] if m["tipo"] == "cargo" else -m["monto"] for m in movimientos)
@@ -586,7 +586,7 @@ def cuenta_corriente_nueva(cliente_id):
       ejemplo cuando el mecánico compra en nombre de un cliente suyo.
     """
     conn = db.get_connection()
-    cliente = conn.execute("SELECT * FROM clientes WHERE id=?", (cliente_id,)).fetchone()
+    cliente = conn.execute("SELECT * FROM clientes WHERE id=%s", (cliente_id,)).fetchone()
     if not cliente:
         conn.close()
         flash("No encontré ese cliente.", "danger")
@@ -600,9 +600,9 @@ def cuenta_corriente_nueva(cliente_id):
 
     if tipo == "pago":
         try:
-            monto = float(request.form.get("monto") or 0)
-        except ValueError:
-            monto = 0
+            monto = a_decimal(request.form.get("monto"))
+        except InvalidOperation:
+            monto = Decimal("0")
         if monto <= 0:
             flash("El monto tiene que ser mayor a cero.", "danger")
             conn.close()
@@ -611,7 +611,7 @@ def cuenta_corriente_nueva(cliente_id):
         conn.execute(
             """INSERT INTO cuenta_corriente_movimientos
                (cliente_id, cliente_tercero_nombre, monto, tipo, observaciones)
-               VALUES (?, ?, ?, 'pago', ?)""",
+               VALUES (%s, %s, %s, 'pago', %s)""",
             (cliente_id, cliente_tercero_nombre, monto, observaciones),
         )
         conn.commit()
@@ -635,7 +635,7 @@ def cuenta_corriente_nueva(cliente_id):
             continue
         if cant <= 0:
             continue
-        producto = conn.execute("SELECT * FROM productos WHERE id=?", (pid,)).fetchone()
+        producto = conn.execute("SELECT * FROM productos WHERE id=%s", (pid,)).fetchone()
         if not producto:
             continue
         subtotal = cant * producto["precio_venta"]
@@ -661,19 +661,19 @@ def cuenta_corriente_nueva(cliente_id):
     cur = conn.execute(
         """INSERT INTO cuenta_corriente_movimientos
            (cliente_id, cliente_tercero_nombre, tercero_cuit_dni, tercero_condicion_iva, monto, tipo, observaciones)
-           VALUES (?, ?, ?, ?, ?, 'cargo', ?)""",
+           VALUES (%s, %s, %s, %s, %s, 'cargo', %s) RETURNING id""",
         (cliente_id, cliente_tercero_nombre, tercero_cuit_dni, tercero_condicion_iva, monto, observaciones),
     )
-    movimiento_id = cur.lastrowid
+    movimiento_id = cur.fetchone()["id"]
     for producto_id, cant, precio_unitario, subtotal in items:
         conn.execute(
             """INSERT INTO cuenta_corriente_movimiento_items
-               (movimiento_id, producto_id, cantidad, precio_unitario, subtotal) VALUES (?, ?, ?, ?, ?)""",
+               (movimiento_id, producto_id, cantidad, precio_unitario, subtotal) VALUES (%s, %s, %s, %s, %s)""",
             (movimiento_id, producto_id, cant, precio_unitario, subtotal),
         )
         # el producto se lo lleva ahora mismo, solo falta que se pague —
         # mismo criterio que una venta al contado.
-        conn.execute("UPDATE productos SET stock_actual = stock_actual - ? WHERE id=?", (cant, producto_id))
+        conn.execute("UPDATE productos SET stock_actual = stock_actual - %s WHERE id=%s", (cant, producto_id))
     conn.commit()
     conn.close()
 
@@ -692,7 +692,7 @@ def cuenta_corriente_facturar(cliente_id, movimiento_id):
     facturacion_afip.emitir_factura_movimiento(movimiento_id)
     conn = db.get_connection()
     estado = conn.execute(
-        "SELECT facturacion_estado, facturacion_error FROM cuenta_corriente_movimientos WHERE id=?",
+        "SELECT facturacion_estado, facturacion_error FROM cuenta_corriente_movimientos WHERE id=%s",
         (movimiento_id,),
     ).fetchone()
     conn.close()
@@ -718,7 +718,8 @@ def clientes_top_deudores():
                   - COALESCE(SUM(CASE WHEN m.tipo='pago' THEN m.monto ELSE 0 END), 0) AS saldo
            FROM clientes c JOIN cuenta_corriente_movimientos m ON m.cliente_id = c.id
            GROUP BY c.id
-           HAVING saldo > 0
+           HAVING COALESCE(SUM(CASE WHEN m.tipo='cargo' THEN m.monto ELSE 0 END), 0)
+                  - COALESCE(SUM(CASE WHEN m.tipo='pago' THEN m.monto ELSE 0 END), 0) > 0
            ORDER BY saldo DESC
            LIMIT 5"""
     ).fetchall()
@@ -743,14 +744,14 @@ def clientes_top():
     condicion_fecha = ""
     if periodo != "todo":
         desde = (datetime.now() - timedelta(days=int(periodo))).strftime("%Y-%m-%d")
-        condicion_fecha = "WHERE v.fecha >= ?"
+        condicion_fecha = "WHERE v.fecha >= %s"
         parametros = [desde]
 
     ranking = conn.execute(
         f"""SELECT c.id, c.nombre, c.tipo_cliente, COUNT(v.id) AS cant_compras, SUM(v.total) AS total
             FROM ventas v JOIN clientes c ON c.id = v.cliente_id
             {condicion_fecha}
-            GROUP BY v.cliente_id ORDER BY total DESC LIMIT 5""",
+            GROUP BY c.id ORDER BY total DESC LIMIT 5""",
         parametros,
     ).fetchall()
 
@@ -764,7 +765,7 @@ def clientes_top():
         margen = conn.execute(
             f"""SELECT COALESCE(SUM(vi.cantidad * (vi.precio_unitario - p.precio_costo)), 0) AS margen
                 FROM venta_items vi JOIN ventas v ON v.id = vi.venta_id JOIN productos p ON p.id = vi.producto_id
-                WHERE v.cliente_id = ? {"AND v.fecha >= ?" if condicion_fecha else ""}""",
+                WHERE v.cliente_id = %s {"AND v.fecha >= %s" if condicion_fecha else ""}""",
             params_margen,
         ).fetchone()
         margenes[r["id"]] = margen["margen"]
@@ -772,7 +773,7 @@ def clientes_top():
     promociones_vigentes = conn.execute(
         """SELECT pa.*, c.nombre AS cliente_nombre FROM promociones_aplicadas pa
            JOIN clientes c ON c.id = pa.cliente_id
-           WHERE fecha_inicio <= date('now') AND (fecha_fin IS NULL OR fecha_fin >= date('now'))
+           WHERE fecha_inicio <= CURRENT_DATE AND (fecha_fin IS NULL OR fecha_fin >= CURRENT_DATE)
            ORDER BY fecha_aprobacion DESC"""
     ).fetchall()
 
@@ -794,9 +795,9 @@ def promocion_nueva(cliente_id):
     if tipo not in ("porcentaje", "monto_fijo"):
         tipo = "porcentaje"
     try:
-        porcentaje_o_monto = float(request.form.get("porcentaje_o_monto") or 0)
-    except ValueError:
-        porcentaje_o_monto = 0
+        porcentaje_o_monto = a_decimal(request.form.get("porcentaje_o_monto"))
+    except InvalidOperation:
+        porcentaje_o_monto = Decimal("0")
     alcance = request.form.get("alcance", "todo")
     if alcance not in ("todo", "productos_puntuales"):
         alcance = "todo"
@@ -812,15 +813,15 @@ def promocion_nueva(cliente_id):
     cur = conn.execute(
         """INSERT INTO promociones_aplicadas
            (cliente_id, porcentaje_o_monto, tipo, alcance, fecha_inicio, fecha_fin, aprobado_por)
-           VALUES (?, ?, ?, ?, ?, ?, ?)""",
+           VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id""",
         (cliente_id, porcentaje_o_monto, tipo, alcance, fecha_inicio, fecha_fin, aprobado_por),
     )
-    promocion_id = cur.lastrowid
+    promocion_id = cur.fetchone()["id"]
 
     if alcance == "productos_puntuales":
         for producto_id in request.form.getlist("producto_id"):
             conn.execute(
-                "INSERT INTO promocion_productos (promocion_id, producto_id) VALUES (?, ?)",
+                "INSERT INTO promocion_productos (promocion_id, producto_id) VALUES (%s, %s)",
                 (promocion_id, producto_id),
             )
 
@@ -834,7 +835,7 @@ def promocion_nueva(cliente_id):
 def promocion_finalizar(promocion_id):
     conn = db.get_connection()
     conn.execute(
-        "UPDATE promociones_aplicadas SET fecha_fin=? WHERE id=?",
+        "UPDATE promociones_aplicadas SET fecha_fin=%s WHERE id=%s",
         (datetime.now().strftime("%Y-%m-%d"), promocion_id),
     )
     conn.commit()
@@ -1980,13 +1981,13 @@ def stock_no_facturado():
         except ValueError:
             cantidad = 0
         try:
-            precio = float(request.form.get("precio") or 0)
-        except ValueError:
-            precio = 0
+            precio = a_decimal(request.form.get("precio"))
+        except InvalidOperation:
+            precio = Decimal("0")
         contraparte = request.form.get("contraparte", "").strip() or None
         observaciones = request.form.get("observaciones", "").strip() or None
 
-        producto = conn.execute("SELECT * FROM productos WHERE id=?", (producto_id,)).fetchone() if producto_id else None
+        producto = conn.execute("SELECT * FROM productos WHERE id=%s", (producto_id,)).fetchone() if producto_id else None
         if not producto or cantidad <= 0:
             flash("Elegí un producto válido (de la lista) y una cantidad mayor a cero.", "danger")
             conn.close()
@@ -1999,11 +2000,11 @@ def stock_no_facturado():
 
         conn.execute(
             """INSERT INTO movimientos_no_facturados (tipo, producto_id, cantidad, precio, contraparte, observaciones)
-               VALUES (?, ?, ?, ?, ?, ?)""",
+               VALUES (%s, %s, %s, %s, %s, %s)""",
             (tipo, producto["id"], cantidad, precio, contraparte, observaciones),
         )
         delta = cantidad if tipo == "compra" else -cantidad
-        conn.execute("UPDATE productos SET stock_actual = stock_actual + ? WHERE id=?", (delta, producto["id"]))
+        conn.execute("UPDATE productos SET stock_actual = stock_actual + %s WHERE id=%s", (delta, producto["id"]))
         conn.commit()
         conn.close()
         flash("Movimiento registrado y stock actualizado.", "success")
@@ -2023,7 +2024,7 @@ def stock_no_facturado():
 @app.route("/stock/no-facturado/<int:movimiento_id>/conciliar", methods=["POST"])
 def stock_no_facturado_conciliar(movimiento_id):
     conn = db.get_connection()
-    conn.execute("UPDATE movimientos_no_facturados SET conciliado=1 WHERE id=?", (movimiento_id,))
+    conn.execute("UPDATE movimientos_no_facturados SET conciliado=true WHERE id=%s", (movimiento_id,))
     conn.commit()
     conn.close()
     flash("Movimiento marcado como conciliado.", "success")
@@ -2033,7 +2034,7 @@ def stock_no_facturado_conciliar(movimiento_id):
 @app.route("/stock/no-facturado/<int:movimiento_id>/desconciliar", methods=["POST"])
 def stock_no_facturado_desconciliar(movimiento_id):
     conn = db.get_connection()
-    conn.execute("UPDATE movimientos_no_facturados SET conciliado=0 WHERE id=?", (movimiento_id,))
+    conn.execute("UPDATE movimientos_no_facturados SET conciliado=false WHERE id=%s", (movimiento_id,))
     conn.commit()
     conn.close()
     flash("Movimiento desmarcado.", "info")
