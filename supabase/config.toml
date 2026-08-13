@@ -385,6 +385,14 @@ deno_version = 2
 # [edge_runtime.secrets]
 # secret_key = "env(SECRET_VALUE)"
 
+# Deshabilitado a propósito (Tarea 1 de la migración a Postgres, ver
+# CLAUDE.md): en esta máquina los contenedores analytics/vector (Logflare)
+# no arrancaban (RuntimeError "could not find persistent term for endpoint
+# LogflareWeb.Endpoint", un problema conocido de la CLI de Supabase, no de
+# este proyecto) y bloqueaban `npx supabase start`. Nada de este sistema usa
+# Analytics/Logflare -- solo hace falta Postgres -- así que se apagó acá en
+# vez de perseguir el problema. Si algún día hace falta Studio con logs
+# reales, revisar si sigue pasando y, si no, volver a poner `true`.
 [analytics]
 enabled = false
 port = 54327

@@ -45,7 +45,13 @@ def test_la_planilla_lista_solo_proveedores_activos(db_conn):
 
 
 def test_importar_datos_carga_un_producto_con_precio_exacto(db_conn):
-    """El importador escribe plata: tiene que llegar como Decimal exacto."""
+    """No llama al importador (ver nota del módulo más arriba): construye el
+    Decimal a mano y lo hace ida y vuelta por un INSERT/SELECT directo. Solo
+    prueba que la columna NUMERIC de Postgres devuelve el mismo Decimal
+    exacto que se escribió -- no que `scripts/importar_datos.py` arme ese
+    valor bien a partir de un Excel. Ese contrato lo cubre
+    `test_numero_tolera_formato_argentino_y_devuelve_decimal`, más abajo, que
+    sí llama a la función de parseo real del script."""
     db_conn.execute(
         """INSERT INTO productos (nombre, categoria, precio_costo, precio_venta)
            VALUES ('Importado', 'Frenos', %s, %s)""",

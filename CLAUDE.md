@@ -68,7 +68,11 @@ mantiene en el roadmap sin importar lo anterior.
 
 ## Decisiones tomadas
 
-- **Arquitectura**: web app Flask + SQLite (`data.db`), corre local.
+- **Arquitectura**: web app Flask + Postgres (migrado desde SQLite el
+  13/08/2026, ver la sección "Migración a Postgres" más abajo). Corre local
+  contra un Postgres levantado por la CLI de Supabase; en producción
+  apuntaría al Postgres alojado por Supabase — ver esa misma sección para
+  el porqué y el detalle técnico.
 - **Usuarios**: el hermano + 1-2 empleados.
 - **Alcance acordado**: ventas, stock, clientes, **facturación/comprobantes**
   y **compras a proveedores**.
@@ -689,6 +693,130 @@ Agregado después:
     una sola operación en `/ventas/dia`, y un movimiento de stock sin
     factura sumó el stock esperado.
 
+## Migración a Postgres (13/08/2026) — Plan 1 de 2
+
+Hasta acá el sistema corría sobre SQLite (`data.db`, un archivo local). Se
+migró completo a Postgres, sobre [Supabase](https://supabase.com) como
+proveedor: local corre contra el Postgres que levanta la CLI de Supabase en
+Docker, y en producción apuntaría al Postgres alojado por Supabase. El
+motivo es el próximo paso del roadmap (desplegar en Vercel, ver "Plan 1 de
+2" al final de esta sección): Vercel corre el código en funciones
+serverless sin disco persistente, así que un archivo SQLite local
+simplemente no sobrevive entre invocaciones — hace falta una base de datos
+de verdad, alcanzable por red, y Supabase da esa base (Postgres) más,
+cuando se ejecute el Plan 2, autenticación y storage de archivos sin sumar
+otro proveedor más.
+
+Qué cambió, para quien conocía el sistema por su versión en SQLite:
+
+- **El esquema ya no lo crea `database.py`**: vive en
+  `supabase/migrations/` (un archivo SQL versionado por migración, aplicado
+  por la CLI de Supabase). `core/database.py` pasó a ser solo conexión +
+  helpers de consulta/siembra de datos de ejemplo — ver el docstring al
+  principio del archivo.
+- **La plata es `NUMERIC(12,2)`, no `REAL`**: psycopg devuelve esas
+  columnas como `Decimal` de Python, nunca `float`. Toda conversión desde
+  un formulario pasa por `a_decimal()` (helper en `core/app.py`) — nunca
+  `float()` en una columna de plata. Esto no es un detalle cosmético: un
+  `float()` reintroducido en un cálculo de plata **no lo va a atrapar
+  ningún test de integración**, porque el cast de Postgres de `float8` a
+  `numeric(12,2)` absorbe el error de redondeo para montos realistas, y
+  psycopg siempre devuelve `Decimal` de una columna NUMERIC sin importar
+  qué tipo escribió el código que insertó. La única forma de cazar esa
+  regresión es leyendo el código o con un test unitario del helper en sí
+  (ver `tests/test_database_helpers.py` / los tests de `a_decimal` en
+  `tests/test_clientes_productos.py`), no con un test que solo mira lo que
+  quedó guardado en la base.
+- **Las fechas son tipos de fecha reales** (`DATE`/`TIMESTAMPTZ`), no texto.
+  Python trabaja con objetos `date`/`datetime` de verdad en vez de strings
+  armados a mano.
+- **Búsquedas case-insensitive usan `ILIKE`, no `LIKE`**: en SQLite `LIKE`
+  ya era case-insensitive para ASCII; en Postgres no, así que un `LIKE`
+  suelto en una búsqueda es un buscador roto en silencio para cualquier
+  texto con mayúsculas.
+
+### Desarrollo local
+
+1. `npx supabase start` — levanta Postgres (y el resto de los servicios de
+   Supabase) en contenedores Docker locales. Imprime la cadena de conexión;
+   por default queda en
+   `postgresql://postgres:postgres@127.0.0.1:54322/postgres`, que es el
+   default que ya trae `core/database.py` si no se define `DATABASE_URL`.
+   `npx supabase stop` la apaga; `npx supabase db reset` vuelve a aplicar
+   todas las migraciones de `supabase/migrations/` desde cero (borra los
+   datos locales).
+2. Variable de entorno `DATABASE_URL`: apunta a esa cadena de conexión (o a
+   la del Postgres real en producción). `python app.py` la lee igual que
+   antes leía la ubicación de `data.db`.
+3. En `supabase/config.toml`, `[analytics] enabled = false` está apagado a
+   propósito: en la máquina donde se hizo la migración los contenedores
+   analytics/vector (Logflare) no arrancaban (un problema conocido de la
+   CLI de Supabase, no de este proyecto) y bloqueaban `npx supabase start`.
+   Nada de este sistema usa Analytics/Logflare, así que se apagó en vez de
+   perseguir el problema — ver el comentario en el propio archivo.
+
+### Gotcha de `prepare_threshold=None` (importante, rompe recién en producción)
+
+`core/database.py` conecta con `psycopg.connect(DATABASE_URL, row_factory=dict_row,
+prepare_threshold=None)`. Ese último parámetro **no es opcional**: psycopg
+activa "prepared statements" en el servidor a partir de la quinta vez que
+ejecuta la misma consulta, como optimización. El pooler de Supabase en modo
+transacción (el que se usa en producción para no agotar conexiones) no
+soporta prepared statements, porque cada consulta puede caer en una
+conexión física distinta del pool. Sin `prepare_threshold=None`, el sistema
+anda perfecto en desarrollo (Postgres local, sin pooler) y en las primeras
+requests de producción, y recién empieza a tirar errores cuando una
+consulta puntual llega a su quinta ejecución — un bug que aparece tarde,
+de forma intermitente, y sin relación obvia con el cambio que lo causó.
+Si en algún refactor futuro se agrega una conexión a mano en vez de usar
+`db.get_connection()`, hay que repetir este parámetro.
+
+### Suite de tests
+
+`tests/` (pytest). `tests/conftest.py` define `db_conn` (conexión con
+rollback automático al final de cada test, para no ensuciar la base) y un
+fixture `autouse` que, después de cada test, deja la base como recién
+migrada (trunca todas las tablas y resiembra `categorias`/`subcategorias`)
+— hace falta porque algunos tests de ruta necesitan commitear de verdad
+para que la conexión propia del `test_client` de Flask vea los datos.
+
+Correrla (con `npx supabase start` ya levantado):
+
+```
+python -m pytest tests/ -v
+```
+
+Por default apunta al mismo Postgres local de arriba
+(`postgresql://postgres:postgres@127.0.0.1:54322/postgres`); se puede
+apuntar a otra base con la variable `DATABASE_URL_TEST`. `tests/test_rutas.py`
+es la red de seguridad más amplia: recorre las rutas GET principales del
+sistema (logueado y sin loguear) y solo verifica que ninguna devuelva un
+error de servidor — no reemplaza a los tests más específicos de cada
+pantalla, que sí verifican números (stock, totales, Decimal exacto, etc.).
+
+### Plan 1 de 2
+
+Esta migración (a la que nos referimos acá como "Plan 1") deja el sistema
+corriendo completo sobre Postgres, con la suite de tests de respaldo, y
+sigue funcionando local con `python app.py` exactamente igual que antes.
+**Todavía no está desplegado en ningún lado** — sigue siendo un sistema que
+corre en la compu del local — y el login **sigue siendo el propio**, con la
+tabla `usuarios` y `password_hash` (no se tocó nada de autenticación en
+esta migración).
+
+El Plan 2 (a escribir en `docs/superpowers/plans/` después de este) cubre
+lo que falta para desplegarlo de verdad en Vercel: migrar el login a
+Supabase Auth, mover las fotos de producto (`static/img/productos/`) a
+Supabase Storage (Vercel tampoco tiene disco persistente para eso),
+`vercel.json`, `ProxyFix` (necesario detrás del proxy de Vercel — ver el
+gotcha de `Host`/CSRF ya anotado en la sección de Seguridad más abajo),
+activar `SESSION_COOKIE_SECURE`, cargar las variables de entorno de
+producción, y el deploy en sí. Precondiciones humanas de ese plan (ninguna
+hace falta para lo que ya está hecho acá): crear el proyecto en Supabase,
+crear el proyecto en Vercel y conectarlo al repositorio, cargar las
+variables de entorno ahí, y crear el primer usuario admin desde el panel
+de Supabase una vez que el login use Supabase Auth.
+
 ## Estructura
 
 ```
@@ -723,19 +851,30 @@ frenos_embragues_app/
 ├── listas_proveedores/        # listas de precios de proveedores (datos del
 │                                 negocio, no se suben al repositorio)
 │
+├── supabase/                  # Postgres local (ver "Migración a Postgres")
+│   ├── config.toml               # config de la CLI de Supabase
+│   └── migrations/               # esquema versionado (SQL), reemplaza lo
+│                                    que antes creaba database.py a mano
+│
+├── tests/                     # suite de pytest (ver "Migración a Postgres")
+│   ├── conftest.py               # fixtures compartidas (db_conn, limpieza)
+│   └── test_*.py
+│
 ├── docs/                      # documentación técnica y funcional completa
 │   ├── DOCUMENTACION_TECNICA.md
 │   └── DOCUMENTACION_FUNCIONAL.md
 │
 ├── templates/                 # pantallas (Bootstrap 5, Chart.js en el dashboard)
 ├── static/                    # CSS/imágenes, incluye fotos de producto subidas
-├── Dockerfile                 # imagen para desplegar en cualquier hosting (gunicorn)
-├── docker-compose.yml         # para probar la imagen local antes de subirla
+├── Dockerfile                 # imagen para desplegar en cualquier hosting (gunicorn) —
+│                                 desactualizada tras la migración a Postgres, ver
+│                                 "Dockerización" más abajo
+├── docker-compose.yml         # ídem
 ├── requirements.txt
-├── .env.example                # plantilla de variables de entorno (copiar a .env)
+├── .env.example                # plantilla de variables de entorno (copiar a .env),
+│                                  ahora incluye DATABASE_URL
 ├── README.md                   # guía rápida de instalación y uso
-├── CLAUDE.md                   # este archivo: memoria técnica del proyecto
-└── data.db                     # base SQLite (se crea sola la primera vez)
+└── CLAUDE.md                   # este archivo: memoria técnica del proyecto
 ```
 
 Los scripts de `scripts/` siempre se corren desde la **raíz del proyecto**
@@ -793,10 +932,15 @@ Orden acordado con Celes (actualizado 04/08/2026):
 7. **Analítica más profunda**: rentabilidad por producto, rotación/lentitud
    de stock, estacionalidad, segmentación de clientes (esto es también lo que
    más le interesa a Celes como ejercicio de análisis de datos).
-8. **Hosting**: hoy corre local. ~~Empaquetado en Docker~~ — **listo** (ver
-   sección "Dockerización" más abajo), falta elegir el hosting de verdad y
-   desplegar ahí (con volumen persistente real, no todos los planes free lo
-   dan). Con la tienda online ya lista, este paso se vuelve más urgente:
+8. **Hosting**: hoy corre local. ~~Migrar a Postgres~~ — **listo** (13/08,
+   ver "Migración a Postgres" más arriba), era el paso previo necesario
+   para este punto porque Vercel no tiene disco persistente para SQLite.
+   El camino de despliegue elegido es Vercel + Supabase, no el Docker de
+   la sección "Dockerización" de abajo (esa sección quedó desactualizada,
+   ver la nota al principio). Falta el Plan 2 completo: Supabase Auth,
+   Supabase Storage para las fotos, `vercel.json`, `ProxyFix`,
+   `SESSION_COOKIE_SECURE`, variables de entorno de producción y el deploy
+   en sí. Con la tienda online ya lista, este paso se vuelve más urgente:
    Mercado Pago necesita una URL pública para el webhook de pagos (se puede
    probar con ngrok mientras tanto, ver sección de la tienda). También
    dispara el resto de la sección de seguridad (HTTPS, cookies seguras, 2FA).
@@ -918,9 +1062,25 @@ si falta configuración, y que el webhook procesa correctamente un pago
 Falta probar el flujo real de Checkout Pro (redirección + webhook real) en
 cuanto haya `access_token` + URL pública.
 
-## Dockerización (lista para desplegar en cualquier hosting)
+## Dockerización (escrita para SQLite, desactualizada tras la migración a Postgres)
 
-Objetivo: empaquetar el sistema para poder subirlo a cualquier lado (Render,
+**Nota (13/08/2026)**: toda esta sección se escribió cuando el sistema
+corría sobre SQLite y describe un mecanismo (volumen `SI_INSTANCE_DIR` con
+`data.db`) que ya no existe en el código — `database.py` ya no define
+`INSTANCE_DIR`/`DB_PATH`/`CREDENCIALES_PATH` (ver "Migración a Postgres"
+más arriba), así que el `Dockerfile`/`docker-compose.yml` actuales fijan
+una variable de entorno (`SI_INSTANCE_DIR`) que el código ya no lee. La
+imagen probablemente todavía compile y corra (gunicorn no depende de eso),
+pero la promesa de persistencia que describe esta sección (SQLite en un
+volumen) ya no aplica: la persistencia real ahora es el `DATABASE_URL`
+apuntando a Postgres. Se dejó la sección tal cual (sin reescribirla) porque
+el plan de deploy real ya no es este camino Docker/VPS sino Vercel (ver
+Plan 2 en "Migración a Postgres" más arriba, que define `vercel.json` en
+vez de esto) — conviene decidir si este Dockerfile se actualiza, se
+reemplaza por el path de Vercel, o se elimina, en vez de parchearlo a
+ciegas acá.
+
+Objetivo original: empaquetar el sistema para poder subirlo a cualquier lado (Render,
 Railway, Fly.io, un VPS propio, etc.) sin depender de la compu del local —
 es el paso técnico que destraba el punto 8 del roadmap (Hosting).
 
@@ -980,9 +1140,15 @@ Ya resuelto:
 
 Pendiente, en orden de cuándo se vuelve necesario:
 
-1. **Backups de `data.db`**: por ahora manual (copiarlo a Drive/Dropbox).
-   Evaluar automatizarlo — Celes ya tiene Google Drive conectado en el chat
-   de trabajo, se podría programar una copia periódica desde ahí.
+1. **Backups**: antes de la migración a Postgres (ver "Migración a
+   Postgres" más arriba) era copiar `data.db` a mano a Drive/Dropbox. Con
+   Postgres/Supabase esto cambia: Supabase hace backups automáticos del
+   proyecto alojado (con retención según el plan), así que lo pendiente acá
+   es más bien confirmar qué plan de Supabase se va a usar en producción y
+   qué retención de backups incluye, no seguir copiando un archivo a mano.
+   Sigue pendiente en local (el Postgres que levanta `npx supabase start`
+   no tiene backups automáticos, pero tampoco es donde vive el dato real
+   del negocio una vez desplegado).
 2. **Credenciales de ARCA/Afip SDK y de Mercado Pago**: ya resuelto en el
    código — todos los tokens (`AFIPSDK_ACCESS_TOKEN`, `MERCADOPAGO_ACCESS_TOKEN`,
    `MERCADOPAGO_WEBHOOK_SECRET`, certificados si algún día se pasa a

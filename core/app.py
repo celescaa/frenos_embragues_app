@@ -23,7 +23,6 @@ from . import database as db
 from . import facturacion_afip
 from . import tienda_pagos
 from . import importar_factura
-from . import comprobante_pdf
 from . import envio_mail
 import tempfile
 
@@ -2226,16 +2225,24 @@ def tienda_catalogo():
         parametros.append(modelo)
     if precio_min:
         try:
-            condiciones.append("precio_venta >= %s")
-            parametros.append(a_decimal(precio_min))
+            valor_precio_min = a_decimal(precio_min)
         except (ValueError, InvalidOperation):
             precio_min = ""
+        else:
+            # Agregar la condición solo si la conversión no falló: si se
+            # agrega antes (como pasaba acá), un valor inválido deja un
+            # %s en la consulta sin su parámetro y el filtro rompe la
+            # página en vez de ignorarse (hallazgo de Tarea 12).
+            condiciones.append("precio_venta >= %s")
+            parametros.append(valor_precio_min)
     if precio_max:
         try:
-            condiciones.append("precio_venta <= %s")
-            parametros.append(a_decimal(precio_max))
+            valor_precio_max = a_decimal(precio_max)
         except (ValueError, InvalidOperation):
             precio_max = ""
+        else:
+            condiciones.append("precio_venta <= %s")
+            parametros.append(valor_precio_max)
 
     productos = conn.execute(
         f"SELECT * FROM productos WHERE {' AND '.join(condiciones)} ORDER BY nombre", parametros

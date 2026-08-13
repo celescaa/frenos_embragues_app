@@ -10,12 +10,18 @@ que sí ejercitan core/app.py y fallan contra el código previo al port
 (placeholders `?`, que psycopg no entiende -- ver la verificación empírica
 en task-8-report.md).
 
-Nota sobre facturacion_afip: el cargo de cuenta corriente llama, al final,
-a `facturacion_afip.emitir_factura_movimiento()` -- función de la Tarea 10,
-todavía sin portar (sigue con placeholders `?`). Los tests de cargo la
-neutralizan con monkeypatch para poder verificar el resto de la ruta
-(descuento de stock, inserción del movimiento) sin depender de un módulo
-que no es responsabilidad de esta tarea."""
+Nota sobre facturacion_afip (actualizada en la Tarea 12): el cargo de cuenta
+corriente llama, al final, a `facturacion_afip.emitir_factura_movimiento()`.
+Cuando se escribieron estos tests (Tarea 8) esa función todavía no estaba
+portada (seguía con placeholders `?`) y se neutralizaba con monkeypatch para
+poder verificar el resto de la ruta sin depender de un módulo que no era
+responsabilidad de esa tarea. La Tarea 10 la portó, así que el monkeypatch ya
+no hace falta para evitar un crash -- se sacó a propósito para que estos
+tests ejerciten el camino real: sin `AFIPSDK_ACCESS_TOKEN` configurado en el
+entorno de pruebas, `emitir_factura_movimiento()` es defensiva (nunca lanza
+excepción) y deja el movimiento en `facturacion_estado='sin_configurar'`,
+así que la ruta sigue funcionando igual que antes pero ahora con cobertura
+real de esa función en vez de un doble."""
 from decimal import Decimal
 
 import psycopg
@@ -112,12 +118,13 @@ def test_conciliado_es_booleano(db_conn):
 # port de esta tarea (placeholders `?`, no válidos para psycopg).
 # ---------------------------------------------------------------------------
 @pytest.fixture
-def client(db_conn, monkeypatch):
-    # facturacion_afip.emitir_factura_movimiento() es de la Tarea 10 (todavía
-    # sin portar, sigue con `?`). Se neutraliza acá para que estos tests
-    # verifiquen la ruta de cuenta corriente en sí -- no un módulo que no es
-    # responsabilidad de esta tarea.
-    monkeypatch.setattr(facturacion_afip, "emitir_factura_movimiento", lambda movimiento_id: None)
+def client(db_conn):
+    # Sin monkeypatch (Tarea 12): facturacion_afip.emitir_factura_movimiento()
+    # ya está portada (Tarea 10) y es defensiva -- sin AFIPSDK_ACCESS_TOKEN
+    # configurado en el entorno de pruebas, deja el movimiento en
+    # facturacion_estado='sin_configurar' sin lanzar excepción. Correrla de
+    # verdad acá suma cobertura sin arriesgar los tests (ver docstring del
+    # módulo).
     flask_app.config["TESTING"] = True
     flask_app.config["WTF_CSRF_ENABLED"] = False
     with flask_app.test_client() as c:
