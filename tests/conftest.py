@@ -37,6 +37,51 @@ TABLAS = [
 ]
 
 
+def pytest_configure(config):
+    """Comprueba que la base de pruebas sea la de ESTE proyecto, antes de nada.
+
+    Va en `pytest_configure` (no en un fixture) porque tiene que correr antes
+    de que pytest importe los módulos de test: varios importan `core.app`, que
+    abre la conexión y siembra datos de ejemplo en tiempo de importación. Un
+    fixture llegaría tarde.
+
+    El chequeo no es paranoia: 54322 es el puerto default de la CLI de Supabase
+    para cualquier proyecto, así que si hay otro proyecto local levantado (pasó
+    el 13/08/2026 con `hogar-gestion`) la suite apunta sin avisar a la base de
+    ese otro proyecto. Y `_limpiar_base_de_pruebas` hace TRUNCATE de una lista
+    fija de tablas: contra la base equivocada, eso es borrar datos ajenos. Hoy
+    zafaría de casualidad —el TRUNCATE es una sola sentencia y aborta entera si
+    alguna tabla no existe—, pero eso depende de que los esquemas no se
+    parezcan. Mejor fallar acá, con un mensaje que diga qué pasó.
+    """
+    try:
+        conn = psycopg.connect(PG_URL_TEST, row_factory=dict_row)
+    except psycopg.OperationalError as e:
+        pytest.exit(
+            f"No hay Postgres escuchando en {PG_URL_TEST} ({e.__class__.__name__}). "
+            "Levantalo con `npx supabase start`.",
+            returncode=1,
+        )
+    try:
+        faltantes = [
+            t for t in TABLAS
+            if not conn.execute("SELECT to_regclass(%s) AS t", (t,)).fetchone()["t"]
+        ]
+    finally:
+        conn.close()
+    if faltantes:
+        pytest.exit(
+            f"La base en {PG_URL_TEST} no es la de este proyecto: le faltan "
+            f"{len(faltantes)} de las {len(TABLAS)} tablas del esquema (por "
+            f"ejemplo {', '.join(faltantes[:3])}).\n"
+            "Suele pasar cuando otro proyecto de Supabase quedó levantado y se "
+            "adueñó del puerto. Fijate con `docker ps` quién tiene el 54322, "
+            "levantá el Postgres de este proyecto con `npx supabase start`, o "
+            "apuntá la suite a otra base con DATABASE_URL_TEST.",
+            returncode=1,
+        )
+
+
 @pytest.fixture(scope="session")
 def pg_url():
     return PG_URL_TEST
