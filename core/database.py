@@ -1,246 +1,22 @@
 """
-Esquema e inicialización de la base de datos Postgres para el sistema de
-gestión de ventas de frenos y embragues.
+Conexión y helpers de datos para el sistema de gestión de ventas de frenos y
+embragues, sobre Postgres.
+
+El esquema (creación de tablas) y sus migraciones ya no viven acá: pasaron a
+`supabase/migrations/` (ver Tarea 2 y 4 del plan de migración a Postgres).
+Este módulo ya no crea ni migra nada — solo abre conexiones y expone los
+helpers de consulta/siembra de datos de ejemplo que usa el resto del
+sistema.
 """
-import psycopg
-from psycopg.rows import dict_row
 import os
+import random
 import secrets
 import string
 from datetime import datetime, timedelta
-import random
-from werkzeug.security import generate_password_hash
+from decimal import Decimal
 
-SCHEMA = """
-CREATE TABLE IF NOT EXISTS clientes (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    nombre TEXT NOT NULL,
-    telefono TEXT,
-    email TEXT,
-    direccion TEXT,
-    cuit_dni TEXT,
-    fecha_alta TEXT NOT NULL
-);
-
-CREATE TABLE IF NOT EXISTS proveedores (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    nombre TEXT NOT NULL,
-    telefono TEXT,
-    email TEXT,
-    direccion TEXT,
-    cuit TEXT,
-    activo INTEGER NOT NULL DEFAULT 1
-);
-
-CREATE TABLE IF NOT EXISTS productos (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    codigo TEXT UNIQUE,
-    nombre TEXT NOT NULL,
-    categoria TEXT NOT NULL DEFAULT 'Otros',
-    marca TEXT,
-    modelo_compatible TEXT,
-    precio_costo REAL NOT NULL DEFAULT 0,
-    precio_venta REAL NOT NULL DEFAULT 0,
-    stock_actual INTEGER NOT NULL DEFAULT 0,
-    stock_minimo INTEGER NOT NULL DEFAULT 2,
-    proveedor_id INTEGER,
-    codigo_barras TEXT,
-    pedido_pendiente INTEGER NOT NULL DEFAULT 0,
-    fecha_pedido_pendiente TEXT,
-    FOREIGN KEY (proveedor_id) REFERENCES proveedores(id)
-);
-
-CREATE TABLE IF NOT EXISTS ventas (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    fecha TEXT NOT NULL,
-    cliente_id INTEGER,
-    total REAL NOT NULL DEFAULT 0,
-    metodo_pago TEXT DEFAULT 'Efectivo',
-    tipo_comprobante TEXT DEFAULT 'Remito',
-    numero_comprobante TEXT,
-    FOREIGN KEY (cliente_id) REFERENCES clientes(id)
-);
-
-CREATE TABLE IF NOT EXISTS venta_items (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    venta_id INTEGER NOT NULL,
-    producto_id INTEGER NOT NULL,
-    cantidad INTEGER NOT NULL,
-    precio_unitario REAL NOT NULL,
-    subtotal REAL NOT NULL,
-    FOREIGN KEY (venta_id) REFERENCES ventas(id),
-    FOREIGN KEY (producto_id) REFERENCES productos(id)
-);
-
-CREATE TABLE IF NOT EXISTS compras (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    fecha TEXT NOT NULL,
-    proveedor_id INTEGER,
-    total REAL NOT NULL DEFAULT 0,
-    numero_factura_proveedor TEXT,
-    FOREIGN KEY (proveedor_id) REFERENCES proveedores(id)
-);
-
-CREATE TABLE IF NOT EXISTS compra_items (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    compra_id INTEGER NOT NULL,
-    producto_id INTEGER NOT NULL,
-    cantidad INTEGER NOT NULL,
-    precio_unitario REAL NOT NULL,
-    subtotal REAL NOT NULL,
-    FOREIGN KEY (compra_id) REFERENCES compras(id),
-    FOREIGN KEY (producto_id) REFERENCES productos(id)
-);
-
-CREATE TABLE IF NOT EXISTS producto_proveedor (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    producto_id INTEGER NOT NULL,
-    proveedor_id INTEGER NOT NULL,
-    precio_costo REAL NOT NULL DEFAULT 0,
-    codigo_proveedor TEXT,
-    FOREIGN KEY (producto_id) REFERENCES productos(id),
-    FOREIGN KEY (proveedor_id) REFERENCES proveedores(id),
-    UNIQUE (producto_id, proveedor_id)
-);
-
-CREATE TABLE IF NOT EXISTS pedidos_web (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    fecha TEXT NOT NULL,
-    nombre_cliente TEXT NOT NULL,
-    telefono TEXT,
-    email TEXT,
-    direccion TEXT,
-    cuit_dni TEXT,
-    total REAL NOT NULL DEFAULT 0,
-    estado TEXT NOT NULL DEFAULT 'pendiente_pago',
-    mp_preference_id TEXT,
-    mp_payment_id TEXT,
-    venta_id INTEGER,
-    FOREIGN KEY (venta_id) REFERENCES ventas(id)
-);
-
-CREATE TABLE IF NOT EXISTS pedido_web_items (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    pedido_id INTEGER NOT NULL,
-    producto_id INTEGER NOT NULL,
-    cantidad INTEGER NOT NULL,
-    precio_unitario REAL NOT NULL,
-    subtotal REAL NOT NULL,
-    FOREIGN KEY (pedido_id) REFERENCES pedidos_web(id),
-    FOREIGN KEY (producto_id) REFERENCES productos(id)
-);
-
-CREATE TABLE IF NOT EXISTS categorias (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    nombre TEXT NOT NULL UNIQUE,
-    activo INTEGER NOT NULL DEFAULT 1
-);
-
-CREATE TABLE IF NOT EXISTS subcategorias (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    nombre TEXT NOT NULL,
-    categoria_id INTEGER NOT NULL,
-    activo INTEGER NOT NULL DEFAULT 1,
-    FOREIGN KEY (categoria_id) REFERENCES categorias(id),
-    UNIQUE (categoria_id, nombre)
-);
-
-CREATE TABLE IF NOT EXISTS usuarios (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT NOT NULL UNIQUE,
-    password_hash TEXT NOT NULL,
-    nombre TEXT NOT NULL,
-    rol TEXT NOT NULL DEFAULT 'empleado',
-    activo INTEGER NOT NULL DEFAULT 1,
-    debe_cambiar_password INTEGER NOT NULL DEFAULT 0,
-    intentos_fallidos INTEGER NOT NULL DEFAULT 0,
-    bloqueado_hasta TEXT,
-    fecha_creacion TEXT NOT NULL
-);
-
--- Cuenta corriente de clientes (típicamente mecánicos que compran a crédito
--- para un tercero). Un cargo puede tener varios productos (ver
--- cuenta_corriente_movimiento_items, análoga a venta_items) y, cuando el
--- comprador real es un tercero identificado con su propio CUIT/DNI
--- (tercero_cuit_dni), la Factura A o B se emite a nombre de ese tercero en vez
--- del cliente/mecánico dueño de la cuenta — cliente_tercero_nombre queda
--- como el nombre de referencia en los dos casos (facturado o no).
--- producto_id quedó de una versión anterior (un cargo = un solo producto),
--- ya no se usa para cargos nuevos.
-CREATE TABLE IF NOT EXISTS cuenta_corriente_movimientos (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    cliente_id INTEGER NOT NULL,
-    cliente_tercero_nombre TEXT,
-    tercero_cuit_dni TEXT,
-    producto_id INTEGER,
-    monto REAL NOT NULL,
-    tipo TEXT NOT NULL,
-    fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    venta_id INTEGER,
-    observaciones TEXT,
-    cae TEXT,
-    cae_vencimiento TEXT,
-    punto_venta_arca INTEGER,
-    numero_factura_arca INTEGER,
-    facturacion_estado TEXT,
-    facturacion_error TEXT,
-    FOREIGN KEY (cliente_id) REFERENCES clientes(id),
-    FOREIGN KEY (producto_id) REFERENCES productos(id),
-    FOREIGN KEY (venta_id) REFERENCES ventas(id)
-);
-
--- Productos de un cargo de cuenta corriente (un cargo = varios productos que
--- el mecánico se lleva a crédito, mismo patrón que venta_items). El stock se
--- descuenta al confirmar el cargo, igual que en una venta: el producto ya
--- salió del local, solo falta que se pague.
-CREATE TABLE IF NOT EXISTS cuenta_corriente_movimiento_items (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    movimiento_id INTEGER NOT NULL,
-    producto_id INTEGER NOT NULL,
-    cantidad INTEGER NOT NULL,
-    precio_unitario REAL NOT NULL,
-    subtotal REAL NOT NULL,
-    FOREIGN KEY (movimiento_id) REFERENCES cuenta_corriente_movimientos(id),
-    FOREIGN KEY (producto_id) REFERENCES productos(id)
-);
-
--- Compras/ventas sin factura (no pasan por compras/ventas ni por AFIP), pero
--- sí impactan el mismo stock_actual que todo lo demás.
-CREATE TABLE IF NOT EXISTS movimientos_no_facturados (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    fecha TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    tipo TEXT NOT NULL,
-    producto_id INTEGER NOT NULL,
-    cantidad INTEGER NOT NULL,
-    precio REAL NOT NULL DEFAULT 0,
-    contraparte TEXT,
-    observaciones TEXT,
-    conciliado INTEGER NOT NULL DEFAULT 0,
-    FOREIGN KEY (producto_id) REFERENCES productos(id)
-);
-
--- Descuentos aprobados manualmente para un cliente puntual (ver /clientes/top).
-CREATE TABLE IF NOT EXISTS promociones_aplicadas (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    cliente_id INTEGER NOT NULL,
-    porcentaje_o_monto REAL NOT NULL,
-    tipo TEXT NOT NULL,
-    alcance TEXT NOT NULL,
-    fecha_inicio TEXT NOT NULL,
-    fecha_fin TEXT,
-    aprobado_por TEXT,
-    fecha_aprobacion TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    FOREIGN KEY (cliente_id) REFERENCES clientes(id)
-);
-
-CREATE TABLE IF NOT EXISTS promocion_productos (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    promocion_id INTEGER NOT NULL,
-    producto_id INTEGER NOT NULL,
-    FOREIGN KEY (promocion_id) REFERENCES promociones_aplicadas(id),
-    FOREIGN KEY (producto_id) REFERENCES productos(id)
-);
-"""
+import psycopg
+from psycopg.rows import dict_row
 
 # Cadena de conexión. En desarrollo apunta al Postgres local que levanta
 # `npx supabase start`; en producción, al pooler de Supabase.
@@ -270,8 +46,20 @@ def get_connection():
 
 
 # Categorías del catálogo (local y tienda online). Ya NO es la lista fija:
-# viven en la tabla `categorias`, editable desde /categorias. Esto es solo
-# la carga inicial para bases nuevas (ver _sembrar_categorias).
+# viven en la tabla `categorias`, editable desde /categorias. Esta lista era
+# también el dato de siembra inicial (antes cargado por _sembrar_categorias,
+# en Python, eliminada en la Tarea 4 de la migración a Postgres porque
+# correr eso en cada arranque en frío no tiene sentido en serverless).
+# OJO: esa siembra NO se movió a supabase/migrations/ — ver el comentario de
+# "Concerns" del reporte de la Tarea 4: el test dado verbatim para esta
+# tarea inserta una categoría llamada 'Frenos' asumiendo que la tabla
+# arranca vacía, lo que choca (UniqueViolation) si se la pre-siembra en la
+# migración. Por ahora la tabla `categorias` queda vacía después de un
+# `supabase db reset`; hay que cargarla a mano desde /categorias o resolver
+# ese conflicto antes de sumar la siembra a la migración. Esta lista se
+# conserva como dato de referencia y porque scripts/importar_datos.py
+# todavía la usa junto con CATEGORIAS_RENOMBRADAS para validar la categoría
+# de cada fila.
 CATEGORIAS_INICIALES = [
     "Frenos", "Embragues", "Correas", "Líquidos",
     "Rodamientos y Mazas", "Suspensión y Dirección", "Filtros",
@@ -279,15 +67,11 @@ CATEGORIAS_INICIALES = [
     "Otros",
 ]
 
-# Subcategorías iniciales por categoría. Reemplazadas el 06/08/2026 por una
-# taxonomía más granular armada en otro chat a partir de clasificar de punta
-# a punta las listas de precios reales de 5 proveedores (Distrisuper, Eine,
-# Miguel Angel Sen-Sei, Rio, Roncal — ~107.000 filas). Filtros, Retenes y
-# Juntas y Ferretería no estaban cubiertas por ese trabajo, así que
-# mantienen la taxonomía más simple armada antes. Ver
-# `_migrar_subcategorias_taxonomia_v2` para cómo se reconcilia esto en una
-# base que ya tenía sembrada la taxonomía vieja (más simple) de estas mismas
-# categorías.
+# Subcategorías iniciales por categoría (taxonomía granular armada en otro
+# chat a partir de clasificar de punta a punta las listas de precios reales
+# de 5 proveedores — ~107.000 filas). Mismo caso que CATEGORIAS_INICIALES de
+# arriba: ya no se siembra sola (ni en Python ni en la migración de
+# Supabase), queda como dato de referencia/documentación.
 SUBCATEGORIAS_INICIALES = {
     "Correas": ["Correas", "Tensores y poleas"],
     "Embragues": [
@@ -315,24 +99,6 @@ SUBCATEGORIAS_INICIALES = {
     "Ferretería": ["Tuercas", "Arandelas", "Bulones", "Tornillos"],
 }
 
-# Categorías cubiertas por la taxonomía granular de arriba (06/08/2026) —
-# en una base que ya tenía la taxonomía vieja sembrada para estas mismas
-# categorías, `_migrar_subcategorias_taxonomia_v2` reemplaza las
-# subcategorías viejas por las nuevas de SUBCATEGORIAS_INICIALES.
-CATEGORIAS_CON_TAXONOMIA_V2 = [
-    "Correas", "Embragues", "Frenos", "Rodamientos y Mazas",
-    "Suspensión y Dirección", "Transmisión", "Motor",
-]
-
-# "Rodamientos" y "Amortiguadores" se habían agregado como categorías
-# provisorias (05/08/2026, antes de tener esta taxonomía con subcategorías)
-# al limpiar una lista de precios sin identificar. Se reemplazan por su
-# categoría/subcategoría definitiva (ver _migrar_categorias_reemplazadas).
-CATEGORIAS_REEMPLAZADAS_POR_SUBCATEGORIA = {
-    "Rodamientos": ("Rodamientos y Mazas", "Rodamientos"),
-    "Amortiguadores": ("Suspensión y Dirección", "Amortiguadores"),
-}
-
 # Categorías viejas (antes de sumar Correas/Líquidos) -> nuevas equivalentes.
 # Se usa tanto para actualizar productos ya cargados como en el importador,
 # por si la planilla de carga todavía tiene el desplegable viejo.
@@ -340,20 +106,21 @@ CATEGORIAS_RENOMBRADAS = {"Freno": "Frenos", "Embrague": "Embragues", "Otro": "O
 
 
 def obtener_categorias(conn=None, solo_activas=True):
-    """Nombres de categorías cargadas en la tabla `categorias`, para
-    dropdowns y validación. Si no se pasa una conexión abierta, abre y
-    cierra una propia."""
+    """Categorías cargadas en la tabla `categorias`, para dropdowns y
+    validación. Devuelve filas completas (id, nombre, activo) — mismo
+    patrón que obtener_subcategorias — en vez de solo una lista de nombres.
+    Si no se pasa una conexión abierta, abre y cierra una propia."""
     conn_propia = conn is None
     if conn_propia:
         conn = get_connection()
-    consulta = "SELECT nombre FROM categorias"
+    consulta = "SELECT * FROM categorias"
     if solo_activas:
-        consulta += " WHERE activo = 1"
+        consulta += " WHERE activo = true"
     consulta += " ORDER BY nombre"
-    nombres = [r["nombre"] for r in conn.execute(consulta)]
+    filas = conn.execute(consulta).fetchall()
     if conn_propia:
         conn.close()
-    return nombres
+    return filas
 
 
 def obtener_subcategorias(conn=None, categoria_id=None, solo_activas=True):
@@ -368,10 +135,10 @@ def obtener_subcategorias(conn=None, categoria_id=None, solo_activas=True):
                   JOIN categorias c ON c.id = s.categoria_id"""
     condiciones, params = [], []
     if categoria_id:
-        condiciones.append("s.categoria_id = ?")
+        condiciones.append("s.categoria_id = %s")
         params.append(categoria_id)
     if solo_activas:
-        condiciones.append("s.activo = 1")
+        condiciones.append("s.activo = true")
     if condiciones:
         consulta += " WHERE " + " AND ".join(condiciones)
     consulta += " ORDER BY c.nombre, s.nombre"
@@ -391,7 +158,7 @@ def obtener_cotizaciones_producto(conn, producto_id):
         """SELECT pp.precio_costo, pp.codigo_proveedor, pr.id AS proveedor_id, pr.nombre AS proveedor_nombre,
                   pr.email AS proveedor_email, pr.telefono AS proveedor_telefono
            FROM producto_proveedor pp JOIN proveedores pr ON pr.id = pp.proveedor_id
-           WHERE pp.producto_id = ? AND pr.activo = 1 ORDER BY pp.precio_costo ASC""",
+           WHERE pp.producto_id = %s AND pr.activo = true ORDER BY pp.precio_costo ASC""",
         (producto_id,),
     ).fetchall()
 
@@ -403,212 +170,19 @@ def obtener_mejor_precio_por_producto(conn, producto_id):
     return cotizaciones[0] if cotizaciones else None
 
 
-def init_db():
-    conn = get_connection()
-    conn.executescript(SCHEMA)
-    _migrar(conn)
-    conn.commit()
-    conn.close()
-
-
-def _migrar(conn):
-    """Agrega columnas nuevas a bases creadas con versiones anteriores."""
-    columnas_nuevas = {
-        "productos": [
-            ("codigo_barras", "TEXT"), ("imagen", "TEXT"),
-            ("pedido_pendiente", "INTEGER NOT NULL DEFAULT 0"),
-            ("fecha_pedido_pendiente", "TEXT"),
-            ("subcategoria", "TEXT"),
-        ],
-        "proveedores": [("activo", "INTEGER NOT NULL DEFAULT 1")],
-        "clientes": [
-            ("tipo_cliente", "TEXT NOT NULL DEFAULT 'particular'"),
-            # condición frente al IVA del cliente (ver facturacion_afip.py,
-            # CONDICION_IVA_MAP) — determina si le corresponde Factura A
-            # (Responsable Inscripto con CUIT) o Factura B (cualquier otro
-            # caso). El negocio es Responsable Inscripto, no monotributista:
-            # ya no hay Factura C.
-            ("condicion_iva", "TEXT NOT NULL DEFAULT 'consumidor_final'"),
-        ],
-        "ventas": [
-            ("cae", "TEXT"),
-            ("cae_vencimiento", "TEXT"),
-            ("punto_venta_arca", "INTEGER"),
-            ("numero_factura_arca", "INTEGER"),
-            ("facturacion_estado", "TEXT"),
-            ("facturacion_error", "TEXT"),
-            # vincula dos ventas que son en realidad un mismo pago mixto
-            # (ej. mitad efectivo, mitad tarjeta) para no contarlas dos veces
-            # en "cantidad de ventas" — ver /ventas/dia.
-            ("id_operacion", "TEXT"),
-            # desglose de IVA de la Factura A/B emitida (total ya incluye el
-            # IVA, igual que precio_venta) — nulo mientras no haya CAE.
-            ("imp_neto", "REAL"),
-            ("imp_iva", "REAL"),
-        ],
-        "cuenta_corriente_movimientos": [
-            # CUIT/DNI del tercero real a nombre de quien se factura un cargo
-            # (si no se carga, se factura al cliente/mecánico dueño de la
-            # cuenta, comportamiento de siempre).
-            ("tercero_cuit_dni", "TEXT"),
-            # condición frente al IVA del tercero (solo relevante si se cargó
-            # tercero_cuit_dni) — mismos valores que clientes.condicion_iva.
-            ("tercero_condicion_iva", "TEXT"),
-            ("imp_neto", "REAL"),
-            ("imp_iva", "REAL"),
-            ("tipo_comprobante", "TEXT"),
-        ],
-    }
-    for tabla, columnas in columnas_nuevas.items():
-        existentes = {r["name"] for r in conn.execute(f"PRAGMA table_info({tabla})")}
-        for nombre, tipo in columnas:
-            if nombre not in existentes:
-                conn.execute(f"ALTER TABLE {tabla} ADD COLUMN {nombre} {tipo}")
-
-    # Productos cargados con la taxonomía vieja (Freno/Embrague/Otro) pasan
-    # a la nueva (Frenos/Embragues/Otros) — Correas y Líquidos son nuevas,
-    # no requieren migrar nada.
-    for vieja, nueva in CATEGORIAS_RENOMBRADAS.items():
-        conn.execute("UPDATE productos SET categoria=? WHERE categoria=?", (nueva, vieja))
-
-    _sembrar_categorias(conn)
-    _sembrar_subcategorias(conn)
-    _migrar_categorias_reemplazadas(conn)
-    _migrar_subcategorias_taxonomia_v2(conn)
-
-
-def _sembrar_categorias(conn):
-    """Carga la tabla `categorias` con las iniciales (solo si están vacías,
-    para no revivir una que alguien desactivó/borró a propósito) y suma
-    cualquier categoría que ya tengan productos cargados pero que todavía
-    no esté en la tabla (por ejemplo, bases viejas migradas)."""
-    if conn.execute("SELECT COUNT(*) AS c FROM categorias").fetchone()["c"] == 0:
-        for nombre in CATEGORIAS_INICIALES:
-            conn.execute("INSERT OR IGNORE INTO categorias (nombre) VALUES (?)", (nombre,))
-
-    faltantes = conn.execute(
-        """SELECT DISTINCT categoria FROM productos
-           WHERE categoria IS NOT NULL AND TRIM(categoria) != ''
-           AND categoria NOT IN (SELECT nombre FROM categorias)"""
-    ).fetchall()
-    for f in faltantes:
-        conn.execute("INSERT OR IGNORE INTO categorias (nombre) VALUES (?)", (f["categoria"],))
-
-
-def _sembrar_subcategorias(conn):
-    """Carga SUBCATEGORIAS_INICIALES la primera vez que corre (tabla
-    subcategorias vacía) — de ahí en más no revive nada que se haya
-    desactivado/borrado a propósito desde /categorias."""
-    if conn.execute("SELECT COUNT(*) AS c FROM subcategorias").fetchone()["c"] > 0:
-        return
-    for categoria_nombre, subcategorias in SUBCATEGORIAS_INICIALES.items():
-        cat = conn.execute("SELECT id FROM categorias WHERE nombre=?", (categoria_nombre,)).fetchone()
-        if not cat:
-            conn.execute("INSERT OR IGNORE INTO categorias (nombre) VALUES (?)", (categoria_nombre,))
-            cat = conn.execute("SELECT id FROM categorias WHERE nombre=?", (categoria_nombre,)).fetchone()
-        for nombre in subcategorias:
-            conn.execute(
-                "INSERT OR IGNORE INTO subcategorias (nombre, categoria_id) VALUES (?, ?)",
-                (nombre, cat["id"]),
-            )
-
-
-def _migrar_categorias_reemplazadas(conn):
-    """Pasa los productos de una categoría provisoria vieja a su
-    categoría/subcategoría definitiva (CATEGORIAS_REEMPLAZADAS_POR_SUBCATEGORIA)
-    y borra la categoría vieja si ya no le quedan productos. Idempotente: la
-    segunda vez que corre, la categoría vieja ya no existe y no hace nada."""
-    for vieja, (categoria_nueva, subcategoria_nueva) in CATEGORIAS_REEMPLAZADAS_POR_SUBCATEGORIA.items():
-        vieja_row = conn.execute("SELECT id FROM categorias WHERE nombre=?", (vieja,)).fetchone()
-        if not vieja_row:
-            continue
-        conn.execute(
-            "UPDATE productos SET categoria=?, subcategoria=? WHERE categoria=?",
-            (categoria_nueva, subcategoria_nueva, vieja),
-        )
-        en_uso = conn.execute("SELECT COUNT(*) AS c FROM productos WHERE categoria=?", (vieja,)).fetchone()["c"]
-        if en_uso == 0:
-            conn.execute("DELETE FROM categorias WHERE id=?", (vieja_row["id"],))
-
-
-def _migrar_subcategorias_taxonomia_v2(conn):
-    """Reconcilia una base que ya tenía sembrada la taxonomía de
-    subcategorías vieja (más simple) con la nueva, más granular
-    (SUBCATEGORIAS_INICIALES, CATEGORIAS_CON_TAXONOMIA_V2 — ver el
-    comentario ahí). Por cada categoría cubierta por la taxonomía nueva:
-    borra las subcategorías viejas que ya no están en la lista nueva (solo
-    si ningún producto las tiene asignadas, para no perder datos reales) y
-    agrega las que falten. Idempotente: si ya se aplicó, no encuentra nada
-    para borrar ni para agregar."""
-    for categoria_nombre in CATEGORIAS_CON_TAXONOMIA_V2:
-        cat = conn.execute("SELECT id FROM categorias WHERE nombre=?", (categoria_nombre,)).fetchone()
-        if not cat:
-            continue
-        nuevas = set(SUBCATEGORIAS_INICIALES.get(categoria_nombre, []))
-        existentes = conn.execute(
-            "SELECT id, nombre FROM subcategorias WHERE categoria_id=?", (cat["id"],)
-        ).fetchall()
-        for s in existentes:
-            if s["nombre"] in nuevas:
-                continue
-            en_uso = conn.execute(
-                "SELECT COUNT(*) AS c FROM productos WHERE subcategoria=?", (s["nombre"],)
-            ).fetchone()["c"]
-            if en_uso == 0:
-                conn.execute("DELETE FROM subcategorias WHERE id=?", (s["id"],))
-        for nombre in nuevas:
-            conn.execute(
-                "INSERT OR IGNORE INTO subcategorias (nombre, categoria_id) VALUES (?, ?)",
-                (nombre, cat["id"]),
-            )
-
-
 def _generar_password_temporal(largo=10):
     alfabeto = string.ascii_letters + string.digits
     return "".join(secrets.choice(alfabeto) for _ in range(largo))
 
 
-def seed_admin_user():
-    """Crea el primer usuario (admin) si todavía no hay ninguno cargado.
-
-    La contraseña se genera al azar y se guarda en un archivo de texto local
-    (nunca en el código ni en el repositorio) para que el dueño la vea una
-    sola vez. En el primer login el sistema obliga a cambiarla.
-    """
-    conn = get_connection()
-    cur = conn.cursor()
-    cur.execute("SELECT COUNT(*) AS c FROM usuarios")
-    if cur.fetchone()["c"] > 0:
-        conn.close()
-        return
-
-    password_temporal = _generar_password_temporal()
-    cur.execute(
-        """INSERT INTO usuarios (username, password_hash, nombre, rol, activo, debe_cambiar_password, fecha_creacion)
-           VALUES (?, ?, ?, 'admin', 1, 1, ?)""",
-        ("admin", generate_password_hash(password_temporal), "Administrador", datetime.now().strftime("%Y-%m-%d")),
-    )
-    conn.commit()
-    conn.close()
-
-    with open(CREDENCIALES_PATH, "w") as f:
-        f.write(
-            "Usuario y contraseña iniciales del sistema\n"
-            "===========================================\n\n"
-            "Usuario:     admin\n"
-            f"Contraseña:  {password_temporal}\n\n"
-            "El sistema va a pedir que la cambies apenas inicies sesión por primera vez.\n"
-            "Después de cambiarla, podés borrar este archivo con confianza.\n"
-        )
-
-
-def seed_demo_data():
-    """Carga datos de ejemplo solo si la base está vacía."""
-    conn = get_connection()
+def seed_demo_data(conn):
+    """Carga datos de ejemplo solo si la base está vacía. Antes abría su
+    propia conexión (`seed_demo_data()`); ahora la recibe, para poder
+    correr dentro de la transacción de un test o de un script que ya tenga
+    una abierta."""
     cur = conn.cursor()
     cur.execute("SELECT COUNT(*) AS c FROM productos")
     if cur.fetchone()["c"] > 0:
-        conn.close()
         return  # ya hay datos, no pisar nada
 
     hoy = datetime.now()
@@ -618,10 +192,20 @@ def seed_demo_data():
         ("Embragues Rosario SRL", "0341-4551133", "info@embraguesrosario.com", "Rosario, Santa Fe", "30-70987654-3"),
         ("Distribuidora Autopartes Litoral", "0341-4559900", "contacto@dal.com.ar", "Rosario, Santa Fe", "30-69876543-2"),
     ]
-    cur.executemany(
-        "INSERT INTO proveedores (nombre, telefono, email, direccion, cuit) VALUES (?, ?, ?, ?, ?)",
-        proveedores,
-    )
+    # Uno por uno (no executemany) para capturar el id real que les asigna
+    # Postgres: a diferencia del rowid de SQLite, la secuencia de un
+    # IDENTITY no es transaccional, así que no se puede asumir que van a
+    # quedar en 1/2/3 acá (por ejemplo, si este mismo seed ya corrió antes
+    # en una transacción que se revirtió, la secuencia ya avanzó).
+    # id_proveedor[i] es el id real del proveedor que antes se
+    # referenciaba como el entero i+1 en `productos` de abajo.
+    id_proveedor = [
+        cur.execute(
+            "INSERT INTO proveedores (nombre, telefono, email, direccion, cuit) VALUES (%s, %s, %s, %s, %s) RETURNING id",
+            p,
+        ).fetchone()["id"]
+        for p in proveedores
+    ]
 
     clientes = [
         ("Juan Pérez", "341-5551234", "juanperez@gmail.com", "Av. Pellegrini 1200", "20-30111222-3"),
@@ -631,56 +215,54 @@ def seed_demo_data():
         ("Carlos Fernández", "341-5558877", "", "Córdoba 3400", ""),
     ]
     cur.executemany(
-        "INSERT INTO clientes (nombre, telefono, email, direccion, cuit_dni, fecha_alta) VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO clientes (nombre, telefono, email, direccion, cuit_dni, fecha_alta) VALUES (%s, %s, %s, %s, %s, %s)",
         [(n, t, e, d, c, hoy.strftime("%Y-%m-%d")) for n, t, e, d, c in clientes],
     )
 
     productos = [
-        ("FR-001", "Juego de pastillas de freno delanteras", "Frenos", "Bosch", "VW Gol / Voyage", 8500, 14900, 18, 5, 1),
-        ("FR-002", "Juego de pastillas de freno traseras", "Frenos", "Bosch", "VW Gol / Voyage", 7200, 12500, 14, 5, 1),
-        ("FR-003", "Disco de freno delantero ventilado", "Frenos", "Fremax", "Fiat Cronos", 12500, 21900, 10, 4, 1),
-        ("FR-004", "Disco de freno trasero macizo", "Frenos", "Fremax", "Fiat Cronos", 9800, 16900, 3, 4, 1),
-        ("FR-005", "Cilindro maestro de freno", "Frenos", "TRW", "Chevrolet Onix", 15400, 26900, 6, 2, 1),
-        ("FR-006", "Cañería de freno flexible", "Frenos", "TRW", "Universal", 3200, 6200, 25, 6, 1),
-        ("FR-007", "Líquido de frenos DOT 4 (500ml)", "Líquidos", "Bosch", "Universal", 2100, 4200, 40, 10, 1),
-        ("EMB-001", "Kit de embrague completo (disco+plato+collarín)", "Embragues", "Luk", "VW Gol / Voyage", 42000, 68900, 8, 3, 2),
-        ("EMB-002", "Kit de embrague completo", "Embragues", "Sachs", "Fiat Cronos / Argo", 45500, 74900, 5, 3, 2),
-        ("EMB-003", "Collarín hidráulico", "Embragues", "Luk", "Chevrolet Onix / Prisma", 18700, 31900, 2, 3, 2),
-        ("EMB-004", "Cable de embrague", "Embragues", "Fremax", "Renault Kangoo", 5600, 9900, 12, 5, 2),
-        ("EMB-005", "Bomba de embrague hidráulica", "Embragues", "Sachs", "Ford Ka", 21300, 35900, 4, 3, 2),
-        ("COR-001", "Correa de distribución", "Correas", "Gates", "VW Gol / Voyage", 6800, 11900, 15, 5, 3),
-        ("COR-002", "Correa poly-V (accesorios)", "Correas", "Gates", "Fiat Cronos / Argo", 4200, 7900, 20, 5, 3),
-        ("OTR-001", "Kit de fijación de disco de freno", "Otros", "Genérico", "Universal", 900, 1900, 30, 10, 3),
-        ("OTR-002", "Grasa para embrague/frenos (pomo)", "Otros", "Genérico", "Universal", 1500, 2900, 20, 8, 3),
+        ("FR-001", "Juego de pastillas de freno delanteras", "Frenos", "Bosch", "VW Gol / Voyage", Decimal("8500.00"), Decimal("14900.00"), 18, 5, id_proveedor[0]),
+        ("FR-002", "Juego de pastillas de freno traseras", "Frenos", "Bosch", "VW Gol / Voyage", Decimal("7200.00"), Decimal("12500.00"), 14, 5, id_proveedor[0]),
+        ("FR-003", "Disco de freno delantero ventilado", "Frenos", "Fremax", "Fiat Cronos", Decimal("12500.00"), Decimal("21900.00"), 10, 4, id_proveedor[0]),
+        ("FR-004", "Disco de freno trasero macizo", "Frenos", "Fremax", "Fiat Cronos", Decimal("9800.00"), Decimal("16900.00"), 3, 4, id_proveedor[0]),
+        ("FR-005", "Cilindro maestro de freno", "Frenos", "TRW", "Chevrolet Onix", Decimal("15400.00"), Decimal("26900.00"), 6, 2, id_proveedor[0]),
+        ("FR-006", "Cañería de freno flexible", "Frenos", "TRW", "Universal", Decimal("3200.00"), Decimal("6200.00"), 25, 6, id_proveedor[0]),
+        ("FR-007", "Líquido de frenos DOT 4 (500ml)", "Líquidos", "Bosch", "Universal", Decimal("2100.00"), Decimal("4200.00"), 40, 10, id_proveedor[0]),
+        ("EMB-001", "Kit de embrague completo (disco+plato+collarín)", "Embragues", "Luk", "VW Gol / Voyage", Decimal("42000.00"), Decimal("68900.00"), 8, 3, id_proveedor[1]),
+        ("EMB-002", "Kit de embrague completo", "Embragues", "Sachs", "Fiat Cronos / Argo", Decimal("45500.00"), Decimal("74900.00"), 5, 3, id_proveedor[1]),
+        ("EMB-003", "Collarín hidráulico", "Embragues", "Luk", "Chevrolet Onix / Prisma", Decimal("18700.00"), Decimal("31900.00"), 2, 3, id_proveedor[1]),
+        ("EMB-004", "Cable de embrague", "Embragues", "Fremax", "Renault Kangoo", Decimal("5600.00"), Decimal("9900.00"), 12, 5, id_proveedor[1]),
+        ("EMB-005", "Bomba de embrague hidráulica", "Embragues", "Sachs", "Ford Ka", Decimal("21300.00"), Decimal("35900.00"), 4, 3, id_proveedor[1]),
+        ("COR-001", "Correa de distribución", "Correas", "Gates", "VW Gol / Voyage", Decimal("6800.00"), Decimal("11900.00"), 15, 5, id_proveedor[2]),
+        ("COR-002", "Correa poly-V (accesorios)", "Correas", "Gates", "Fiat Cronos / Argo", Decimal("4200.00"), Decimal("7900.00"), 20, 5, id_proveedor[2]),
+        ("OTR-001", "Kit de fijación de disco de freno", "Otros", "Genérico", "Universal", Decimal("900.00"), Decimal("1900.00"), 30, 10, id_proveedor[2]),
+        ("OTR-002", "Grasa para embrague/frenos (pomo)", "Otros", "Genérico", "Universal", Decimal("1500.00"), Decimal("2900.00"), 20, 8, id_proveedor[2]),
     ]
     cur.executemany(
         """INSERT INTO productos
            (codigo, nombre, categoria, marca, modelo_compatible, precio_costo, precio_venta, stock_actual, stock_minimo, proveedor_id)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+           VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
         productos,
     )
-    conn.commit()
 
     # Algunos productos con cotizaciones de más de un proveedor, para mostrar
     # el comparador de precios (a quién le conviene comprarle cada producto).
     cotizaciones = [
-        ("FR-001", "Frenos del Sur SA", 8500, "BOS-4501"),
-        ("FR-001", "Distribuidora Autopartes Litoral", 8100, "DAL-9012"),
-        ("FR-003", "Frenos del Sur SA", 12500, "FRX-2201"),
-        ("FR-003", "Distribuidora Autopartes Litoral", 12900, "DAL-2202"),
-        ("EMB-001", "Embragues Rosario SRL", 42000, "LUK-7701"),
-        ("EMB-001", "Distribuidora Autopartes Litoral", 43500, "DAL-7701"),
+        ("FR-001", "Frenos del Sur SA", Decimal("8500.00"), "BOS-4501"),
+        ("FR-001", "Distribuidora Autopartes Litoral", Decimal("8100.00"), "DAL-9012"),
+        ("FR-003", "Frenos del Sur SA", Decimal("12500.00"), "FRX-2201"),
+        ("FR-003", "Distribuidora Autopartes Litoral", Decimal("12900.00"), "DAL-2202"),
+        ("EMB-001", "Embragues Rosario SRL", Decimal("42000.00"), "LUK-7701"),
+        ("EMB-001", "Distribuidora Autopartes Litoral", Decimal("43500.00"), "DAL-7701"),
     ]
     for codigo, proveedor_nombre, precio, codigo_prov in cotizaciones:
-        producto = cur.execute("SELECT id FROM productos WHERE codigo=?", (codigo,)).fetchone()
-        proveedor = cur.execute("SELECT id FROM proveedores WHERE nombre=?", (proveedor_nombre,)).fetchone()
+        producto = cur.execute("SELECT id FROM productos WHERE codigo=%s", (codigo,)).fetchone()
+        proveedor = cur.execute("SELECT id FROM proveedores WHERE nombre=%s", (proveedor_nombre,)).fetchone()
         if producto and proveedor:
             cur.execute(
                 """INSERT INTO producto_proveedor (producto_id, proveedor_id, precio_costo, codigo_proveedor)
-                   VALUES (?, ?, ?, ?)""",
+                   VALUES (%s, %s, %s, %s)""",
                 (producto["id"], proveedor["id"], precio, codigo_prov),
             )
-    conn.commit()
 
     # Ventas de ejemplo de los últimos ~4 meses, para que el dashboard tenga datos
     cur.execute("SELECT id, precio_venta FROM productos")
@@ -697,27 +279,27 @@ def seed_demo_data():
         tipo = random.choice(["Remito", "Recibo"])
         n_items = random.randint(1, 3)
         elegidos = random.sample(productos_db, n_items)
-        total = 0
-        cur.execute(
-            "INSERT INTO ventas (fecha, cliente_id, total, metodo_pago, tipo_comprobante, numero_comprobante) VALUES (?, ?, 0, ?, ?, ?)",
+        total = Decimal("0")
+        venta_id = cur.execute(
+            "INSERT INTO ventas (fecha, cliente_id, total, metodo_pago, tipo_comprobante, numero_comprobante) VALUES (%s, %s, 0, %s, %s, %s) RETURNING id",
             (fecha, cliente_id, metodo, tipo, f"{1000+i:06d}"),
-        )
-        venta_id = cur.lastrowid
+        ).fetchone()["id"]
         for prod in elegidos:
             cantidad = random.randint(1, 4)
             subtotal = cantidad * prod["precio_venta"]
             total += subtotal
             cur.execute(
-                "INSERT INTO venta_items (venta_id, producto_id, cantidad, precio_unitario, subtotal) VALUES (?, ?, ?, ?, ?)",
+                "INSERT INTO venta_items (venta_id, producto_id, cantidad, precio_unitario, subtotal) VALUES (%s, %s, %s, %s, %s)",
                 (venta_id, prod["id"], cantidad, prod["precio_venta"], subtotal),
             )
-        cur.execute("UPDATE ventas SET total = ? WHERE id = ?", (total, venta_id))
-
-    conn.commit()
-    conn.close()
+        cur.execute("UPDATE ventas SET total = %s WHERE id = %s", (total, venta_id))
 
 
 if __name__ == "__main__":
-    init_db()
-    seed_demo_data()
-    print("Base de datos inicializada en:", DB_PATH)
+    _conn = get_connection()
+    try:
+        seed_demo_data(_conn)
+        _conn.commit()
+    finally:
+        _conn.close()
+    print("Datos de ejemplo cargados en:", DATABASE_URL)

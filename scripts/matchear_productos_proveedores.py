@@ -158,7 +158,6 @@ def _matchear_por_descripcion(descripcion, categoria, candidatos, umbral):
 
 
 def procesar(archivo, categoria, subcategoria, umbral, aplicar):
-    db.init_db()
     wb = openpyxl.load_workbook(archivo, data_only=True, read_only=True)
     conn = db.get_connection()
 

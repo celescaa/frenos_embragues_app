@@ -85,9 +85,20 @@ def manejar_csrf_error(e):
 LOCKOUT_INTENTOS = 5
 LOCKOUT_MINUTOS = 15
 
-db.init_db()
-db.seed_demo_data()
-db.seed_admin_user()
+
+# El esquema (tablas, columnas) ya no lo crea/migra este módulo: vive en
+# supabase/migrations/ (Tarea 2 y 4 de la migración a Postgres). El primer
+# usuario admin ya no se autogenera acá tampoco (en serverless, ejecutar eso
+# en cada arranque en frío no tiene sentido) — se crea a mano; en el Plan 2
+# pasa a Supabase Auth. seed_demo_data() sigue corriendo (es idempotente:
+# no hace nada si ya hay productos cargados), pero ahora necesita una
+# conexión propia porque dejó de abrir la suya.
+_conn_seed = db.get_connection()
+try:
+    db.seed_demo_data(_conn_seed)
+    _conn_seed.commit()
+finally:
+    _conn_seed.close()
 
 
 # ---------------------------------------------------------------------------

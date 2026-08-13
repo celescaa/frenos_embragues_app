@@ -111,7 +111,6 @@ def _procesar_hoja(ws, proveedor_id, proveedor_nombre, conn, resumen):
 
 def main():
     archivo = sys.argv[1] if len(sys.argv) > 1 else ARCHIVO_POR_DEFECTO
-    db.init_db()
     wb = load_workbook(archivo, data_only=True)
     conn = db.get_connection()
 
