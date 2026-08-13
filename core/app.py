@@ -10,6 +10,7 @@ sistema).
 import os
 import secrets
 import sqlite3
+import psycopg
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, session
 from flask_wtf import CSRFProtect
 from flask_wtf.csrf import CSRFError
@@ -444,7 +445,7 @@ def clientes_lista():
         clientes = conn.execute(
             f"""SELECT c.*, {saldo_expr}
                 FROM clientes c LEFT JOIN cuenta_corriente_movimientos m ON m.cliente_id = c.id
-                WHERE c.nombre LIKE ? OR c.telefono LIKE ? OR c.email LIKE ?
+                WHERE c.nombre ILIKE %s OR c.telefono ILIKE %s OR c.email ILIKE %s
                 GROUP BY c.id ORDER BY c.nombre""",
             (f"%{q}%", f"%{q}%", f"%{q}%"),
         ).fetchall()
@@ -464,7 +465,7 @@ def clientes_nuevo():
         conn = db.get_connection()
         conn.execute(
             """INSERT INTO clientes (nombre, telefono, email, direccion, cuit_dni, tipo_cliente, condicion_iva, fecha_alta)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
             (
                 request.form["nombre"],
                 request.form.get("telefono", ""),
@@ -488,8 +489,8 @@ def clientes_editar(cliente_id):
     conn = db.get_connection()
     if request.method == "POST":
         conn.execute(
-            """UPDATE clientes SET nombre=?, telefono=?, email=?, direccion=?, cuit_dni=?, tipo_cliente=?,
-               condicion_iva=? WHERE id=?""",
+            """UPDATE clientes SET nombre=%s, telefono=%s, email=%s, direccion=%s, cuit_dni=%s, tipo_cliente=%s,
+               condicion_iva=%s WHERE id=%s""",
             (
                 request.form["nombre"],
                 request.form.get("telefono", ""),
@@ -505,7 +506,7 @@ def clientes_editar(cliente_id):
         conn.close()
         flash("Cliente actualizado.", "success")
         return redirect(url_for("clientes_lista"))
-    cliente = conn.execute("SELECT * FROM clientes WHERE id=?", (cliente_id,)).fetchone()
+    cliente = conn.execute("SELECT * FROM clientes WHERE id=%s", (cliente_id,)).fetchone()
     conn.close()
     return render_template("cliente_form.html", cliente=cliente, condiciones_iva=facturacion_afip.CONDICIONES_IVA)
 
@@ -513,7 +514,7 @@ def clientes_editar(cliente_id):
 @app.route("/clientes/<int:cliente_id>/eliminar", methods=["POST"])
 def clientes_eliminar(cliente_id):
     conn = db.get_connection()
-    conn.execute("DELETE FROM clientes WHERE id=?", (cliente_id,))
+    conn.execute("DELETE FROM clientes WHERE id=%s", (cliente_id,))
     conn.commit()
     conn.close()
     flash("Cliente eliminado.", "info")
@@ -839,7 +840,7 @@ def guardar_cotizaciones_proveedor(conn, producto_id, form):
     precios = form.getlist("cotiz_precio_costo")
     codigos = form.getlist("cotiz_codigo_proveedor")
 
-    conn.execute("DELETE FROM producto_proveedor WHERE producto_id=?", (producto_id,))
+    conn.execute("DELETE FROM producto_proveedor WHERE producto_id=%s", (producto_id,))
     vistos = set()
     for proveedor_id, precio, codigo_prov in zip(proveedor_ids, precios, codigos):
         if not proveedor_id or not precio:
@@ -849,7 +850,7 @@ def guardar_cotizaciones_proveedor(conn, producto_id, form):
         vistos.add(proveedor_id)
         conn.execute(
             """INSERT INTO producto_proveedor (producto_id, proveedor_id, precio_costo, codigo_proveedor)
-               VALUES (?, ?, ?, ?)""",
+               VALUES (%s, %s, %s, %s)""",
             (producto_id, proveedor_id, float(precio), (codigo_prov or "").strip() or None),
         )
 
@@ -870,13 +871,13 @@ def productos_lista():
         # el mismo buscador de texto libre de siempre, ahora también matchea
         # por modelo de auto compatible (ej. "Gol") además de nombre/código/
         # marca — no hace falta un campo de búsqueda aparte para eso.
-        condiciones.append("(nombre LIKE ? OR codigo LIKE ? OR marca LIKE ? OR modelo_compatible LIKE ? OR codigo_barras = ?)")
+        condiciones.append("(nombre ILIKE %s OR codigo ILIKE %s OR marca ILIKE %s OR modelo_compatible ILIKE %s OR codigo_barras = %s)")
         parametros += [f"%{q}%", f"%{q}%", f"%{q}%", f"%{q}%", q]
     if categoria:
-        condiciones.append("categoria = ?")
+        condiciones.append("categoria = %s")
         parametros.append(categoria)
     if subcategoria:
-        condiciones.append("subcategoria = ?")
+        condiciones.append("subcategoria = %s")
         parametros.append(subcategoria)
 
     consulta = "SELECT * FROM productos"
@@ -904,7 +905,7 @@ def productos_nuevo():
         cur = conn.execute(
             """INSERT INTO productos
                (codigo, nombre, categoria, subcategoria, marca, modelo_compatible, precio_costo, precio_venta, stock_actual, stock_minimo, proveedor_id, codigo_barras)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
             (
                 request.form.get("codigo") or None,
                 request.form["nombre"],
@@ -920,18 +921,18 @@ def productos_nuevo():
                 request.form.get("codigo_barras") or None,
             ),
         )
-        producto_id = cur.lastrowid
+        producto_id = cur.fetchone()["id"]
         guardar_cotizaciones_proveedor(conn, producto_id, request.form)
 
         nombre_imagen = guardar_imagen_producto(producto_id, request.files.get("imagen"))
         if nombre_imagen:
-            conn.execute("UPDATE productos SET imagen=? WHERE id=?", (nombre_imagen, producto_id))
+            conn.execute("UPDATE productos SET imagen=%s WHERE id=%s", (nombre_imagen, producto_id))
 
         conn.commit()
         conn.close()
         flash("Producto creado correctamente.", "success")
         return redirect(url_for("productos_lista"))
-    proveedores = conn.execute("SELECT * FROM proveedores WHERE activo=1 ORDER BY nombre").fetchall()
+    proveedores = conn.execute("SELECT * FROM proveedores WHERE activo IS TRUE ORDER BY nombre").fetchall()
     categorias = db.obtener_categorias(conn)
     subcategorias_json = subcategorias_por_categoria_json(conn)
     conn.close()
@@ -946,9 +947,9 @@ def productos_editar(producto_id):
     conn = db.get_connection()
     if request.method == "POST":
         conn.execute(
-            """UPDATE productos SET codigo=?, nombre=?, categoria=?, subcategoria=?, marca=?, modelo_compatible=?,
-               precio_costo=?, precio_venta=?, stock_actual=?, stock_minimo=?, proveedor_id=?,
-               codigo_barras=? WHERE id=?""",
+            """UPDATE productos SET codigo=%s, nombre=%s, categoria=%s, subcategoria=%s, marca=%s, modelo_compatible=%s,
+               precio_costo=%s, precio_venta=%s, stock_actual=%s, stock_minimo=%s, proveedor_id=%s,
+               codigo_barras=%s WHERE id=%s""",
             (
                 request.form.get("codigo") or None,
                 request.form["nombre"],
@@ -967,30 +968,30 @@ def productos_editar(producto_id):
         )
         guardar_cotizaciones_proveedor(conn, producto_id, request.form)
 
-        producto_actual = conn.execute("SELECT imagen FROM productos WHERE id=?", (producto_id,)).fetchone()
+        producto_actual = conn.execute("SELECT imagen FROM productos WHERE id=%s", (producto_id,)).fetchone()
         if request.form.get("eliminar_imagen") == "1":
             eliminar_imagen_producto(producto_actual["imagen"])
-            conn.execute("UPDATE productos SET imagen=NULL WHERE id=?", (producto_id,))
+            conn.execute("UPDATE productos SET imagen=NULL WHERE id=%s", (producto_id,))
         else:
             nombre_imagen = guardar_imagen_producto(producto_id, request.files.get("imagen"))
             if nombre_imagen:
                 eliminar_imagen_producto(producto_actual["imagen"])
-                conn.execute("UPDATE productos SET imagen=? WHERE id=?", (nombre_imagen, producto_id))
+                conn.execute("UPDATE productos SET imagen=%s WHERE id=%s", (nombre_imagen, producto_id))
 
         conn.commit()
         conn.close()
         flash("Producto actualizado.", "success")
         return redirect(url_for("productos_lista"))
-    producto = conn.execute("SELECT * FROM productos WHERE id=?", (producto_id,)).fetchone()
+    producto = conn.execute("SELECT * FROM productos WHERE id=%s", (producto_id,)).fetchone()
     # incluye también el proveedor actual del producto aunque esté desactivado,
     # para no perderlo de la ficha si ya estaba asignado antes de desactivarlo.
     proveedores = conn.execute(
-        "SELECT * FROM proveedores WHERE activo=1 OR id=? ORDER BY nombre", (producto["proveedor_id"],)
+        "SELECT * FROM proveedores WHERE activo IS TRUE OR id=%s ORDER BY nombre", (producto["proveedor_id"],)
     ).fetchall()
     cotizaciones = conn.execute(
         """SELECT pp.*, p.nombre AS proveedor_nombre FROM producto_proveedor pp
            JOIN proveedores p ON p.id = pp.proveedor_id
-           WHERE pp.producto_id = ? ORDER BY pp.precio_costo ASC""",
+           WHERE pp.producto_id = %s ORDER BY pp.precio_costo ASC""",
         (producto_id,),
     ).fetchall()
     cotizaciones = [dict(c) for c in cotizaciones]
@@ -1015,10 +1016,10 @@ def productos_editar(producto_id):
 @app.route("/productos/<int:producto_id>/eliminar", methods=["POST"])
 def productos_eliminar(producto_id):
     conn = db.get_connection()
-    producto = conn.execute("SELECT imagen FROM productos WHERE id=?", (producto_id,)).fetchone()
+    producto = conn.execute("SELECT imagen FROM productos WHERE id=%s", (producto_id,)).fetchone()
     if producto:
         eliminar_imagen_producto(producto["imagen"])
-    conn.execute("DELETE FROM productos WHERE id=?", (producto_id,))
+    conn.execute("DELETE FROM productos WHERE id=%s", (producto_id,))
     conn.commit()
     conn.close()
     flash("Producto eliminado.", "info")
@@ -1131,7 +1132,7 @@ def categorias_lista():
         categorias = conn.execute("SELECT * FROM categorias ORDER BY activo DESC, nombre").fetchall()
         subcategorias_todas = db.obtener_subcategorias(conn, solo_activas=False)
     else:
-        categorias = conn.execute("SELECT * FROM categorias WHERE activo=1 ORDER BY nombre").fetchall()
+        categorias = conn.execute("SELECT * FROM categorias WHERE activo IS TRUE ORDER BY nombre").fetchall()
         subcategorias_todas = db.obtener_subcategorias(conn, solo_activas=True)
     conteo = {
         r["categoria"]: r["c"]
@@ -1162,10 +1163,11 @@ def categorias_nueva():
         return redirect(url_for("categorias_lista"))
     conn = db.get_connection()
     try:
-        conn.execute("INSERT INTO categorias (nombre) VALUES (?)", (nombre,))
+        conn.execute("INSERT INTO categorias (nombre) VALUES (%s)", (nombre,))
         conn.commit()
         flash(f"Categoría '{nombre}' creada.", "success")
-    except sqlite3.IntegrityError:
+    except psycopg.errors.UniqueViolation:
+        conn.rollback()
         flash(f"Ya existe una categoría '{nombre}'.", "danger")
     conn.close()
     return redirect(url_for("categorias_lista"))
@@ -1174,15 +1176,15 @@ def categorias_nueva():
 @app.route("/categorias/<int:categoria_id>/eliminar", methods=["POST"])
 def categorias_eliminar(categoria_id):
     conn = db.get_connection()
-    fila = conn.execute("SELECT nombre FROM categorias WHERE id=?", (categoria_id,)).fetchone()
+    fila = conn.execute("SELECT nombre FROM categorias WHERE id=%s", (categoria_id,)).fetchone()
     en_uso = fila and conn.execute(
-        "SELECT COUNT(*) AS c FROM productos WHERE categoria=?", (fila["nombre"],)
+        "SELECT COUNT(*) AS c FROM productos WHERE categoria=%s", (fila["nombre"],)
     ).fetchone()["c"]
     if en_uso:
         flash("No se puede eliminar: hay productos cargados con esta categoría. "
               "Desactivala en su lugar (no se va a poder elegir para productos nuevos).", "danger")
     else:
-        conn.execute("DELETE FROM categorias WHERE id=?", (categoria_id,))
+        conn.execute("DELETE FROM categorias WHERE id=%s", (categoria_id,))
         conn.commit()
         flash("Categoría eliminada.", "info")
     conn.close()
@@ -1192,7 +1194,7 @@ def categorias_eliminar(categoria_id):
 @app.route("/categorias/<int:categoria_id>/activar", methods=["POST"])
 def categorias_activar(categoria_id):
     conn = db.get_connection()
-    conn.execute("UPDATE categorias SET activo=1 WHERE id=?", (categoria_id,))
+    conn.execute("UPDATE categorias SET activo=TRUE WHERE id=%s", (categoria_id,))
     conn.commit()
     conn.close()
     flash("Categoría activada.", "success")
@@ -1202,7 +1204,7 @@ def categorias_activar(categoria_id):
 @app.route("/categorias/<int:categoria_id>/desactivar", methods=["POST"])
 def categorias_desactivar(categoria_id):
     conn = db.get_connection()
-    conn.execute("UPDATE categorias SET activo=0 WHERE id=?", (categoria_id,))
+    conn.execute("UPDATE categorias SET activo=FALSE WHERE id=%s", (categoria_id,))
     conn.commit()
     conn.close()
     flash("Categoría desactivada: no va a aparecer para elegir en productos nuevos, pero lo ya cargado sigue intacto.", "info")
@@ -1218,11 +1220,12 @@ def subcategorias_nueva(categoria_id):
     conn = db.get_connection()
     try:
         conn.execute(
-            "INSERT INTO subcategorias (nombre, categoria_id) VALUES (?, ?)", (nombre, categoria_id)
+            "INSERT INTO subcategorias (nombre, categoria_id) VALUES (%s, %s)", (nombre, categoria_id)
         )
         conn.commit()
         flash(f"Subcategoría '{nombre}' creada.", "success")
-    except sqlite3.IntegrityError:
+    except psycopg.errors.UniqueViolation:
+        conn.rollback()
         flash(f"Esa categoría ya tiene una subcategoría '{nombre}'.", "danger")
     conn.close()
     return redirect(url_for("categorias_lista"))
@@ -1231,15 +1234,15 @@ def subcategorias_nueva(categoria_id):
 @app.route("/subcategorias/<int:subcategoria_id>/eliminar", methods=["POST"])
 def subcategorias_eliminar(subcategoria_id):
     conn = db.get_connection()
-    fila = conn.execute("SELECT nombre FROM subcategorias WHERE id=?", (subcategoria_id,)).fetchone()
+    fila = conn.execute("SELECT nombre FROM subcategorias WHERE id=%s", (subcategoria_id,)).fetchone()
     en_uso = fila and conn.execute(
-        "SELECT COUNT(*) AS c FROM productos WHERE subcategoria=?", (fila["nombre"],)
+        "SELECT COUNT(*) AS c FROM productos WHERE subcategoria=%s", (fila["nombre"],)
     ).fetchone()["c"]
     if en_uso:
         flash("No se puede eliminar: hay productos cargados con esta subcategoría. "
               "Desactivala en su lugar.", "danger")
     else:
-        conn.execute("DELETE FROM subcategorias WHERE id=?", (subcategoria_id,))
+        conn.execute("DELETE FROM subcategorias WHERE id=%s", (subcategoria_id,))
         conn.commit()
         flash("Subcategoría eliminada.", "info")
     conn.close()
@@ -1249,7 +1252,7 @@ def subcategorias_eliminar(subcategoria_id):
 @app.route("/subcategorias/<int:subcategoria_id>/activar", methods=["POST"])
 def subcategorias_activar(subcategoria_id):
     conn = db.get_connection()
-    conn.execute("UPDATE subcategorias SET activo=1 WHERE id=?", (subcategoria_id,))
+    conn.execute("UPDATE subcategorias SET activo=TRUE WHERE id=%s", (subcategoria_id,))
     conn.commit()
     conn.close()
     flash("Subcategoría activada.", "success")
@@ -1259,7 +1262,7 @@ def subcategorias_activar(subcategoria_id):
 @app.route("/subcategorias/<int:subcategoria_id>/desactivar", methods=["POST"])
 def subcategorias_desactivar(subcategoria_id):
     conn = db.get_connection()
-    conn.execute("UPDATE subcategorias SET activo=0 WHERE id=?", (subcategoria_id,))
+    conn.execute("UPDATE subcategorias SET activo=FALSE WHERE id=%s", (subcategoria_id,))
     conn.commit()
     conn.close()
     flash("Subcategoría desactivada: no va a aparecer para elegir en productos nuevos.", "info")
@@ -1500,7 +1503,7 @@ def api_clientes_nuevo():
 
     conn = db.get_connection()
     cur = conn.execute(
-        "INSERT INTO clientes (nombre, telefono, email, direccion, cuit_dni, fecha_alta) VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO clientes (nombre, telefono, email, direccion, cuit_dni, fecha_alta) VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
         (
             nombre,
             request.form.get("telefono", "").strip(),
@@ -1510,7 +1513,7 @@ def api_clientes_nuevo():
             datetime.now().strftime("%Y-%m-%d"),
         ),
     )
-    cliente_id = cur.lastrowid
+    cliente_id = cur.fetchone()["id"]
     conn.commit()
     conn.close()
     return jsonify({"ok": True, "id": cliente_id, "nombre": nombre})
@@ -1543,13 +1546,14 @@ def api_productos_nuevo():
             """INSERT INTO productos
                (codigo, nombre, categoria, subcategoria, marca, precio_costo, precio_venta,
                 stock_actual, stock_minimo, proveedor_id)
-               VALUES (?, ?, ?, ?, ?, ?, ?, 0, ?, ?)""",
+               VALUES (%s, %s, %s, %s, %s, %s, %s, 0, %s, %s) RETURNING id""",
             (codigo, nombre, categoria, subcategoria, marca, precio_costo, precio_venta, stock_minimo, proveedor_id),
         )
-    except sqlite3.IntegrityError:
+    except psycopg.errors.UniqueViolation:
+        conn.rollback()
         conn.close()
         return jsonify({"ok": False, "error": f"Ya existe un producto con el código '{codigo}'."}), 400
-    producto_id = cur.lastrowid
+    producto_id = cur.fetchone()["id"]
     conn.commit()
     conn.close()
     return jsonify({
@@ -1570,7 +1574,7 @@ def api_producto_por_codigo():
         return jsonify({"encontrado": False})
     conn = db.get_connection()
     producto = conn.execute(
-        "SELECT * FROM productos WHERE codigo_barras = ? OR codigo = ?", (codigo, codigo)
+        "SELECT * FROM productos WHERE codigo_barras = %s OR codigo = %s", (codigo, codigo)
     ).fetchone()
     conn.close()
     if not producto:
