@@ -66,11 +66,11 @@ def crear_preferencia(pedido_id):
 
     conn = db.get_connection()
     try:
-        pedido = conn.execute("SELECT * FROM pedidos_web WHERE id=?", (pedido_id,)).fetchone()
+        pedido = conn.execute("SELECT * FROM pedidos_web WHERE id=%s", (pedido_id,)).fetchone()
         items_db = conn.execute(
             """SELECT pwi.*, p.nombre AS producto_nombre
                FROM pedido_web_items pwi JOIN productos p ON p.id = pwi.producto_id
-               WHERE pwi.pedido_id=?""",
+               WHERE pwi.pedido_id=%s""",
             (pedido_id,),
         ).fetchall()
         if not pedido or not items_db:
@@ -108,7 +108,7 @@ def crear_preferencia(pedido_id):
         if not preference_id:
             return None
 
-        conn.execute("UPDATE pedidos_web SET mp_preference_id=? WHERE id=?", (preference_id, pedido_id))
+        conn.execute("UPDATE pedidos_web SET mp_preference_id=%s WHERE id=%s", (preference_id, pedido_id))
         conn.commit()
 
         production = os.environ.get("MERCADOPAGO_PRODUCTION", "").strip() == "1"

@@ -561,7 +561,7 @@ def procesar_factura(path, nombre_archivo, conn):
     except Exception as e:
         return {"error": f"No pude leer el archivo: {e}", "filas": []}
 
-    proveedores = conn.execute("SELECT id, nombre, cuit FROM proveedores WHERE activo=1 ORDER BY nombre").fetchall()
+    proveedores = conn.execute("SELECT id, nombre, cuit FROM proveedores WHERE activo IS TRUE ORDER BY nombre").fetchall()
     catalogo = conn.execute(
         """SELECT p.id, p.codigo, p.nombre, pp.codigo_proveedor
            FROM productos p LEFT JOIN producto_proveedor pp ON pp.producto_id = p.id"""

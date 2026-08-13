@@ -47,7 +47,7 @@ registrada en el sistema.
 import os
 import base64
 import json
-from datetime import datetime
+from decimal import Decimal
 
 from . import database as db
 
@@ -65,7 +65,9 @@ CBTE_TIPO_POR_NOMBRE = {"Factura A": CBTE_TIPO_FACTURA_A, "Factura B": CBTE_TIPO
 # FEParamGetTiposIva de ARCA. Simplificación: todo el catálogo se factura a
 # la tasa general — si algún producto tuviera otra alícuota (10.5%/27%) habría
 # que discriminarlo aparte por ítem, no soportado hoy.
-ALICUOTA_IVA = 0.21
+# Decimal (no float): el cálculo de neto/IVA tiene que dar neto + iva == total
+# exacto, algo que un float no garantiza (ARCA rechaza el comprobante si no).
+ALICUOTA_IVA = Decimal("0.21")
 IVA_ALICUOTA_ID_ARCA = 5
 
 # Monto a partir del cual ARCA exige identificar al receptor (no alcanza con
@@ -196,15 +198,23 @@ def _emitir_factura_arca(cuit_dni, condicion_iva, total, fecha):
     (ventas del local/tienda) como por emitir_factura_movimiento() (cargos
     de cuenta corriente) — mismo criterio de facturación en los dos casos.
 
-    `total` se asume con IVA incluido (el precio que ya maneja el sistema);
-    acá se discrimina en neto + IVA a la tasa general (ALICUOTA_IVA) para
-    mandarlo a ARCA como corresponde en Factura A/B.
+    `total` se asume con IVA incluido (el precio que ya maneja el sistema) y
+    llega como `Decimal` (columna NUMERIC). Acá se discrimina en neto + IVA
+    a la tasa general (ALICUOTA_IVA) con aritmética `Decimal` — neto + iva
+    tiene que dar exactamente `total`, algo que `float` no garantiza y que
+    ARCA exige — y solo se convierte a `float` al armar el payload que se
+    manda a ARCA (la API externa espera números planos, no `Decimal`).
+
+    `fecha` llega como `date` (ventas) o `datetime` (cuenta corriente,
+    columna timestamptz) — las dos tienen `.strftime()`, no hace falta
+    parsear nada.
 
     Devuelve un dict:
       {"estado": "sin_configurar"} si falta AFIPSDK_ACCESS_TOKEN
       {"estado": "error", "error": <detalle>} si falló la llamada a ARCA
       {"estado": "emitida", "cae", "cae_vencimiento", "punto_venta", "numero",
-       "tipo_comprobante", "imp_neto", "imp_iva"}
+       "tipo_comprobante", "imp_neto", "imp_iva"} (imp_neto/imp_iva como
+       Decimal, para guardarlos tal cual en columnas NUMERIC)
     """
     if not afip_configurado():
         return {
@@ -217,13 +227,14 @@ def _emitir_factura_arca(cuit_dni, condicion_iva, total, fecha):
         punto_venta = int(os.environ.get("AFIPSDK_PUNTO_VENTA", PUNTO_VENTA_DEFAULT))
         receptor = datos_receptor(cuit_dni, condicion_iva)
         cbte_tipo = CBTE_TIPO_POR_NOMBRE[receptor["tipo_comprobante"]]
-        fecha_cbte = datetime.strptime(fecha, "%Y-%m-%d").strftime("%Y%m%d")
+        fecha_cbte = fecha.strftime("%Y%m%d")
 
         ultimo = afip.ElectronicBilling.getLastVoucher(punto_venta, cbte_tipo)
         numero = ultimo + 1
-        total = round(float(total), 2)
-        neto = round(total / (1 + ALICUOTA_IVA), 2)
-        iva = round(total - neto, 2)
+        total = total if isinstance(total, Decimal) else Decimal(str(total))
+        total = total.quantize(Decimal("0.01"))
+        neto = (total / (1 + ALICUOTA_IVA)).quantize(Decimal("0.01"))
+        iva = total - neto
 
         data = {
             "CantReg": 1,
@@ -235,16 +246,16 @@ def _emitir_factura_arca(cuit_dni, condicion_iva, total, fecha):
             "CbteDesde": numero,
             "CbteHasta": numero,
             "CbteFch": fecha_cbte,
-            "ImpTotal": total,
+            "ImpTotal": float(total),
             "ImpTotConc": 0,
-            "ImpNeto": neto,
+            "ImpNeto": float(neto),
             "ImpOpEx": 0,
-            "ImpIVA": iva,
+            "ImpIVA": float(iva),
             "ImpTrib": 0,
             "MonId": "PES",
             "MonCotiz": 1,
             "CondicionIVAReceptorId": receptor["CondicionIVAReceptorId"],
-            "Iva": [{"Id": IVA_ALICUOTA_ID_ARCA, "BaseImp": neto, "Importe": iva}],
+            "Iva": [{"Id": IVA_ALICUOTA_ID_ARCA, "BaseImp": float(neto), "Importe": float(iva)}],
         }
 
         resultado = afip.ElectronicBilling.createVoucher(data)
@@ -273,7 +284,7 @@ def emitir_factura(venta_id):
     try:
         venta = conn.execute(
             """SELECT v.*, c.cuit_dni AS cliente_cuit_dni, c.condicion_iva AS cliente_condicion_iva
-               FROM ventas v LEFT JOIN clientes c ON c.id = v.cliente_id WHERE v.id=?""",
+               FROM ventas v LEFT JOIN clientes c ON c.id = v.cliente_id WHERE v.id=%s""",
             (venta_id,),
         ).fetchone()
         if not venta:
@@ -286,10 +297,10 @@ def emitir_factura(venta_id):
         if resultado["estado"] == "emitida":
             conn.execute(
                 """UPDATE ventas SET
-                     cae=?, cae_vencimiento=?, punto_venta_arca=?, numero_factura_arca=?,
-                     imp_neto=?, imp_iva=?, facturacion_estado='emitida', facturacion_error=NULL,
-                     tipo_comprobante=?
-                   WHERE id=?""",
+                     cae=%s, cae_vencimiento=%s, punto_venta_arca=%s, numero_factura_arca=%s,
+                     imp_neto=%s, imp_iva=%s, facturacion_estado='emitida', facturacion_error=NULL,
+                     tipo_comprobante=%s
+                   WHERE id=%s""",
                 (
                     resultado["cae"], resultado["cae_vencimiento"], resultado["punto_venta"], resultado["numero"],
                     resultado["imp_neto"], resultado["imp_iva"], resultado["tipo_comprobante"], venta_id,
@@ -297,7 +308,7 @@ def emitir_factura(venta_id):
             )
         else:
             conn.execute(
-                "UPDATE ventas SET facturacion_estado=?, facturacion_error=? WHERE id=?",
+                "UPDATE ventas SET facturacion_estado=%s, facturacion_error=%s WHERE id=%s",
                 (resultado["estado"], resultado.get("error"), venta_id),
             )
         conn.commit()
@@ -317,7 +328,7 @@ def emitir_factura_movimiento(movimiento_id):
     try:
         mov = conn.execute(
             """SELECT m.*, c.cuit_dni AS cliente_cuit_dni, c.condicion_iva AS cliente_condicion_iva
-               FROM cuenta_corriente_movimientos m JOIN clientes c ON c.id = m.cliente_id WHERE m.id=?""",
+               FROM cuenta_corriente_movimientos m JOIN clientes c ON c.id = m.cliente_id WHERE m.id=%s""",
             (movimiento_id,),
         ).fetchone()
         if not mov:
@@ -330,14 +341,16 @@ def emitir_factura_movimiento(movimiento_id):
             cuit_dni = mov["cliente_cuit_dni"]
             condicion_iva = mov["cliente_condicion_iva"]
 
-        resultado = _emitir_factura_arca(cuit_dni, condicion_iva, mov["monto"], mov["fecha"][:10])
+        # mov["fecha"] es un datetime (columna timestamptz, ver esquema):
+        # ya no hace falta cortar los primeros 10 caracteres de un string.
+        resultado = _emitir_factura_arca(cuit_dni, condicion_iva, mov["monto"], mov["fecha"])
 
         if resultado["estado"] == "emitida":
             conn.execute(
                 """UPDATE cuenta_corriente_movimientos SET
-                     cae=?, cae_vencimiento=?, punto_venta_arca=?, numero_factura_arca=?,
-                     imp_neto=?, imp_iva=?, tipo_comprobante=?, facturacion_estado='emitida', facturacion_error=NULL
-                   WHERE id=?""",
+                     cae=%s, cae_vencimiento=%s, punto_venta_arca=%s, numero_factura_arca=%s,
+                     imp_neto=%s, imp_iva=%s, tipo_comprobante=%s, facturacion_estado='emitida', facturacion_error=NULL
+                   WHERE id=%s""",
                 (
                     resultado["cae"], resultado["cae_vencimiento"], resultado["punto_venta"], resultado["numero"],
                     resultado["imp_neto"], resultado["imp_iva"], resultado["tipo_comprobante"], movimiento_id,
@@ -345,7 +358,7 @@ def emitir_factura_movimiento(movimiento_id):
             )
         else:
             conn.execute(
-                "UPDATE cuenta_corriente_movimientos SET facturacion_estado=?, facturacion_error=? WHERE id=?",
+                "UPDATE cuenta_corriente_movimientos SET facturacion_estado=%s, facturacion_error=%s WHERE id=%s",
                 (resultado["estado"], resultado.get("error"), movimiento_id),
             )
         conn.commit()
@@ -366,7 +379,8 @@ def url_qr_venta(venta):
     cliente_cuit_dni = venta["cliente_cuit"] if "cliente_cuit" in claves else None
     cliente_condicion_iva = venta["cliente_condicion_iva"] if "cliente_condicion_iva" in claves else None
     receptor = datos_receptor(cliente_cuit_dni, cliente_condicion_iva)
-    fecha_cbte = datetime.strptime(venta["fecha"], "%Y-%m-%d").strftime("%Y%m%d")
+    # venta["fecha"] ya es un date (columna DATE): .strftime() directo, sin parsear.
+    fecha_cbte = venta["fecha"].strftime("%Y%m%d")
     cuit_negocio = os.environ.get("AFIPSDK_CUIT", CUIT_PRUEBA_AFIPSDK)
     cbte_tipo = CBTE_TIPO_POR_NOMBRE.get(venta["tipo_comprobante"], CBTE_TIPO_FACTURA_B)
     return _construir_url_qr(
