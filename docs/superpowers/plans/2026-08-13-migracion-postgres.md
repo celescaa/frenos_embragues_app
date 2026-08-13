@@ -48,7 +48,8 @@ Estas reglas aplican a **todas** las tareas de port de consultas. No se repiten 
 | `tests/test_esquema.py` | Verifica tipos de columnas (NUMERIC/DATE) | Crear (Tarea 2) |
 | `tests/test_<area>.py` | Un archivo por área portada | Crear (Tareas 4-10) |
 | `core/database.py` | Conexión + helpers de lectura | Modificar (Tareas 3-4) |
-| `core/app.py` | 146 consultas + rutas | Modificar (Tareas 5-9, 11) |
+| `core/app.py` | 146 consultas + rutas | Modificar (Tarea 4: quita 2 llamadas a `init_db()`/`seed_admin_user()`; Tareas 5-9, 11: el resto) |
+| `scripts/*.py` (4 scripts) | Quitar la llamada a `db.init_db()`, ya innecesaria | Modificar (Tarea 4) |
 | `core/facturacion_afip.py` | 6 consultas | Modificar (Tarea 10) |
 | `core/tienda_pagos.py` | 3 consultas | Modificar (Tarea 10) |
 | `core/importar_factura.py` | 2 consultas | Modificar (Tarea 10) |
@@ -306,6 +307,8 @@ Traducir la constante `SCHEMA` de `core/database.py:28-256` al archivo recién c
 | `TEXT DEFAULT CURRENT_TIMESTAMP` (**esta regla gana sobre la siguiente**) | `TIMESTAMPTZ NOT NULL DEFAULT now()` |
 | `TEXT` en `fecha`, `fecha_alta`, `fecha_inicio`, `fecha_fin`, `fecha_pedido_pendiente` | `DATE` |
 | `TEXT` en `fecha_creacion`, `bloqueado_hasta` | `TIMESTAMPTZ` |
+| `INTEGER` usado como booleano (`activo`, `debe_cambiar_password`, `conciliado`, `pedido_pendiente`) | `BOOLEAN` con default `true`/`false` |
+| `usuarios.id` | `UUID PRIMARY KEY DEFAULT gen_random_uuid()` |
 
 **Cuidado con las columnas `fecha` que llevan default de marca de tiempo.**
 Dos tablas tienen una columna llamada `fecha` que **no** es una fecha simple
@@ -317,8 +320,6 @@ sino una marca de tiempo, porque su default es `CURRENT_TIMESTAMP`. Van a
 
 En cambio `ventas.fecha`, `compras.fecha` y `pedidos_web.fecha` sí son fechas
 simples (`TEXT NOT NULL` sin default) y van a `DATE`.
-| `INTEGER` usado como booleano (`activo`, `debe_cambiar_password`, `conciliado`, `pedido_pendiente`) | `BOOLEAN` con default `true`/`false` |
-| `usuarios.id` | `UUID PRIMARY KEY DEFAULT gen_random_uuid()` |
 
 Las columnas que hoy agrega `_migrar()` (`core/database.py:400-560`) van **directo en el `CREATE TABLE`**: ese mecanismo de migración incremental desaparece. Revisar `_migrar()` completo y confirmar que ninguna columna quede afuera.
 
@@ -769,10 +770,11 @@ mayúsculas, en Postgres sí."
 - Crear: `tests/test_ventas.py`
 
 **Interfaces:**
-- Consume: `db.get_connection()`, `aplicar_promociones()` (Tarea 8).
-- Produce (firma exacta, **no cambia** — la comparten la venta del local y el webhook de la tienda):
-  `registrar_venta(conn, cliente_id, metodo_pago, items, tipo_comprobante_solicitado="Remito", id_operacion=None) -> (venta_id, tipo_comprobante)`
-  donde `items` es una lista de **tuplas** `(producto_id, cantidad, precio_unitario, subtotal)`, no de diccionarios.
+- Consume: `db.get_connection()`.
+- Produce (firmas exactas, **no cambian** — las consume la Tarea 8 y el webhook de la tienda):
+  - `registrar_venta(conn, cliente_id, metodo_pago, items, tipo_comprobante_solicitado="Remito", id_operacion=None) -> (venta_id, tipo_comprobante)`
+  - `aplicar_promociones(conn, cliente_id, items) -> list[tuple]` — vive 6 líneas antes de `registrar_venta()` en el mismo bloque (`core/app.py:1335`); se porta acá, no en la Tarea 8. La Tarea 8 solo la **consume** para verificarla con datos reales de promoción.
+  - En ambas, `items` es una lista de **tuplas** `(producto_id, cantidad, precio_unitario, subtotal)`, no de diccionarios.
 
 - [ ] **Paso 1: Escribir los tests que fallan**
 
@@ -980,8 +982,7 @@ git commit -m "Portar compras, proveedores y pedidos a Postgres"
 - Crear: `tests/test_cuenta_corriente.py`
 
 **Interfaces:**
-- Consume: `db.get_connection()`.
-- Produce (firma exacta, **no cambia**): `aplicar_promociones(conn, cliente_id, items) -> list[tuple]`, donde `items` es una lista de tuplas `(producto_id, cantidad, precio_unitario, subtotal)` y devuelve una lista nueva con la misma forma. La usa `registrar_venta()` de la Tarea 6.
+- Consume: `db.get_connection()`, `aplicar_promociones(conn, cliente_id, items) -> list[tuple]` (Tarea 6 — **ya portada, no se vuelve a tocar acá**; esta tarea solo la ejercita con datos reales de promoción para confirmar el comportamiento de punta a punta).
 
 - [ ] **Paso 1: Escribir los tests que fallan**
 
@@ -1084,7 +1085,7 @@ python -m pytest tests/test_cuenta_corriente.py -v
 Aplicando las restricciones globales. Atención a:
 
 - `core/app.py:751` — `date('now')` pasa a `CURRENT_DATE` en la consulta de promociones vigentes.
-- `aplicar_promociones()`: el descuento porcentual y el prorrateo de monto fijo se calculan con `Decimal`. Redondear a 2 decimales con `.quantize(Decimal("0.01"))` y verificar que la suma de los ítems cuadre con el total.
+- `aplicar_promociones()` **ya está portada por la Tarea 6** — acá no se toca su código, solo se verifica con datos reales (una promoción cargada + una venta) que el descuento calculado en `Decimal` cuadra exacto.
 - `conciliado` pasa a `BOOLEAN`.
 - El umbral `UMBRAL_IDENTIFICACION_RECEPTOR` de `facturacion_afip` se compara contra un `Decimal`.
 
