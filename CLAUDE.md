@@ -897,10 +897,38 @@ Supabase Storage (Vercel tampoco tiene disco persistente para eso),
 gotcha de `Host`/CSRF ya anotado en la sección de Seguridad más abajo),
 activar `SESSION_COOKIE_SECURE`, cargar las variables de entorno de
 producción, y el deploy en sí. Precondiciones humanas de ese plan (ninguna
-hace falta para lo que ya está hecho acá): crear el proyecto en Supabase,
-crear el proyecto en Vercel y conectarlo al repositorio, cargar las
-variables de entorno ahí, y crear el primer usuario admin desde el panel
-de Supabase una vez que el login use Supabase Auth.
+hace falta para lo que ya está hecho acá): ~~crear el proyecto en
+Supabase~~ (hecho, ver abajo), crear el proyecto en Vercel y conectarlo al
+repositorio, cargar las variables de entorno ahí, y crear el primer usuario
+admin desde el panel de Supabase una vez que el login use Supabase Auth.
+
+### Proyecto de Supabase (creado 13/08/2026)
+
+- **Nombre**: `repuestos-san-ignacio`
+- **Región**: São Paulo, Brasil (`sa-east-1`) — la más cercana a Argentina.
+- **Ref del proyecto**: `pjjorgruhvamqbluanen`
+  (`https://pjjorgruhvamqbluanen.supabase.co`). Es el único proyecto del
+  plan gratuito disponible, así que arranca como base de prueba y esa misma
+  después pasa a ser la de producción — no hay un segundo proyecto para
+  separar dev de prod.
+- **Las credenciales no viven acá ni en ningún archivo versionado**: la
+  contraseña de la base y las claves de API (sobre todo `service_role`, que
+  saltea cualquier permiso) van al `.env` local y a las variables de entorno
+  de Vercel, cargadas a mano. `.env` está en `.gitignore`.
+- **El plan gratuito pausa el proyecto tras una semana sin actividad** y hay
+  que despertarlo desde el panel. Irrelevante mientras se prueba; a tener en
+  cuenta cuando el negocio lo use de verdad.
+
+**Decisión ya tomada para el `vercel.json` del Plan 2: la región de las
+funciones tiene que ser `gru1` (São Paulo), no el default.** Vercel corre
+las funciones en `iad1` (Washington) por defecto para todo proyecto nuevo.
+Lo que determina la velocidad no es la distancia entre el usuario y la base,
+sino entre la función y la base: con el default, cada pantalla —que hace
+varias consultas— cruzaría el continente dos veces por consulta. El plan
+Hobby permite una sola región, pero es configurable (`"regions": ["gru1"]`
+en `vercel.json`, o desde Settings → Functions), y la propia documentación
+de Vercel recomienda ponerla donde está la base. Verificado el 13/08/2026 en
+`vercel.com/docs/regions` y `.../functions/configuring-functions/region`.
 
 ## Estructura
 
