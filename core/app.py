@@ -14,7 +14,7 @@ from decimal import Decimal, InvalidOperation
 from flask import Flask, render_template, request, redirect, url_for, flash, jsonify, session
 from flask_wtf import CSRFProtect
 from flask_wtf.csrf import CSRFError
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 from dotenv import load_dotenv
@@ -147,19 +147,23 @@ def login():
         username = request.form.get("username", "").strip()
         password = request.form.get("password", "")
         conn = db.get_connection()
-        usuario = conn.execute("SELECT * FROM usuarios WHERE username = ?", (username,)).fetchone()
+        usuario = conn.execute("SELECT * FROM usuarios WHERE username = %s", (username,)).fetchone()
 
-        # ¿La cuenta está bloqueada por intentos fallidos?
+        # ¿La cuenta está bloqueada por intentos fallidos? bloqueado_hasta es
+        # timestamptz: psycopg ya lo devuelve como datetime tz-aware, no hace
+        # falta parsearlo a mano — comparar contra un datetime.now() naive
+        # lanzaría TypeError, así que "ahora" también se pide tz-aware.
         if usuario and usuario["bloqueado_hasta"]:
-            bloqueado_hasta = datetime.strptime(usuario["bloqueado_hasta"], "%Y-%m-%d %H:%M:%S")
-            if datetime.now() < bloqueado_hasta:
-                minutos = int((bloqueado_hasta - datetime.now()).total_seconds() // 60) + 1
+            bloqueado_hasta = usuario["bloqueado_hasta"]
+            ahora = datetime.now(timezone.utc)
+            if ahora < bloqueado_hasta:
+                minutos = int((bloqueado_hasta - ahora).total_seconds() // 60) + 1
                 flash(f"Demasiados intentos fallidos. Probá de nuevo en {minutos} minuto(s).", "danger")
                 conn.close()
                 return render_template("login.html")
-            conn.execute("UPDATE usuarios SET intentos_fallidos=0, bloqueado_hasta=NULL WHERE id=?", (usuario["id"],))
+            conn.execute("UPDATE usuarios SET intentos_fallidos=0, bloqueado_hasta=NULL WHERE id=%s", (usuario["id"],))
             conn.commit()
-            usuario = conn.execute("SELECT * FROM usuarios WHERE id=?", (usuario["id"],)).fetchone()
+            usuario = conn.execute("SELECT * FROM usuarios WHERE id=%s", (usuario["id"],)).fetchone()
 
         credenciales_validas = (
             usuario and usuario["activo"] and check_password_hash(usuario["password_hash"], password)
@@ -169,14 +173,14 @@ def login():
             if usuario and usuario["activo"]:
                 intentos = usuario["intentos_fallidos"] + 1
                 if intentos >= LOCKOUT_INTENTOS:
-                    bloqueado_hasta = (datetime.now() + timedelta(minutes=LOCKOUT_MINUTOS)).strftime("%Y-%m-%d %H:%M:%S")
+                    bloqueado_hasta = datetime.now(timezone.utc) + timedelta(minutes=LOCKOUT_MINUTOS)
                     conn.execute(
-                        "UPDATE usuarios SET intentos_fallidos=?, bloqueado_hasta=? WHERE id=?",
+                        "UPDATE usuarios SET intentos_fallidos=%s, bloqueado_hasta=%s WHERE id=%s",
                         (intentos, bloqueado_hasta, usuario["id"]),
                     )
                     flash(f"Demasiados intentos fallidos. La cuenta queda bloqueada {LOCKOUT_MINUTOS} minutos.", "danger")
                 else:
-                    conn.execute("UPDATE usuarios SET intentos_fallidos=? WHERE id=?", (intentos, usuario["id"]))
+                    conn.execute("UPDATE usuarios SET intentos_fallidos=%s WHERE id=%s", (intentos, usuario["id"]))
                     flash("Usuario o contraseña incorrectos.", "danger")
                 conn.commit()
             else:
@@ -184,7 +188,7 @@ def login():
             conn.close()
             return render_template("login.html")
 
-        conn.execute("UPDATE usuarios SET intentos_fallidos=0, bloqueado_hasta=NULL WHERE id=?", (usuario["id"],))
+        conn.execute("UPDATE usuarios SET intentos_fallidos=0, bloqueado_hasta=NULL WHERE id=%s", (usuario["id"],))
         conn.commit()
         conn.close()
 
@@ -220,7 +224,7 @@ def cambiar_password():
         confirmar = request.form.get("confirmar", "")
 
         conn = db.get_connection()
-        usuario = conn.execute("SELECT * FROM usuarios WHERE id=?", (session["usuario_id"],)).fetchone()
+        usuario = conn.execute("SELECT * FROM usuarios WHERE id=%s", (session["usuario_id"],)).fetchone()
 
         if not obligatorio and not check_password_hash(usuario["password_hash"], actual):
             flash("La contraseña actual no es correcta.", "danger")
@@ -230,7 +234,7 @@ def cambiar_password():
             flash("Las contraseñas nuevas no coinciden.", "danger")
         else:
             conn.execute(
-                "UPDATE usuarios SET password_hash=?, debe_cambiar_password=0 WHERE id=?",
+                "UPDATE usuarios SET password_hash=%s, debe_cambiar_password=false WHERE id=%s",
                 (generate_password_hash(nueva), usuario["id"]),
             )
             conn.commit()
@@ -377,7 +381,7 @@ def dashboard():
     hoy = datetime.now()
     primer_dia_mes = hoy.replace(day=1).strftime("%Y-%m-%d")
     ventas_mes = conn.execute(
-        "SELECT COALESCE(SUM(total),0) AS t FROM ventas WHERE fecha >= ?", (primer_dia_mes,)
+        "SELECT COALESCE(SUM(total),0) AS t FROM ventas WHERE fecha >= %s", (primer_dia_mes,)
     ).fetchone()["t"]
 
     cant_clientes = conn.execute("SELECT COUNT(*) AS c FROM clientes").fetchone()["c"]
@@ -400,23 +404,26 @@ def dashboard():
         else:
             fin = f"{year:04d}-{month+1:02d}-01"
         total = conn.execute(
-            "SELECT COALESCE(SUM(total),0) AS t FROM ventas WHERE fecha >= ? AND fecha < ?", (inicio, fin)
+            "SELECT COALESCE(SUM(total),0) AS t FROM ventas WHERE fecha >= %s AND fecha < %s", (inicio, fin)
         ).fetchone()["t"]
         meses.append(f"{month:02d}/{year}")
         ventas_por_mes.append(round(total, 2))
 
-    # Top 5 productos más vendidos (por cantidad)
+    # Top 5 productos más vendidos (por cantidad). GROUP BY p.id (no
+    # vi.producto_id): Postgres exige agrupar por la primary key de la
+    # tabla de la que sale p.nombre -- vi.producto_id no alcanza aunque el
+    # JOIN garantice el mismo agrupamiento fila por fila.
     top_productos = conn.execute(
         """SELECT p.nombre, SUM(vi.cantidad) AS cantidad, SUM(vi.subtotal) AS total
            FROM venta_items vi JOIN productos p ON p.id = vi.producto_id
-           GROUP BY vi.producto_id ORDER BY cantidad DESC LIMIT 5"""
+           GROUP BY p.id ORDER BY cantidad DESC LIMIT 5"""
     ).fetchall()
 
-    # Top 5 clientes por monto comprado
+    # Top 5 clientes por monto comprado (mismo motivo: GROUP BY c.id).
     top_clientes = conn.execute(
         """SELECT c.nombre, SUM(v.total) AS total, COUNT(v.id) AS cant_compras
            FROM ventas v JOIN clientes c ON c.id = v.cliente_id
-           GROUP BY v.cliente_id ORDER BY total DESC LIMIT 5"""
+           GROUP BY c.id ORDER BY total DESC LIMIT 5"""
     ).fetchall()
 
     # Stock bajo
@@ -2065,17 +2072,20 @@ def usuarios_nuevo():
         nombre = request.form.get("nombre", "").strip()
         rol = request.form.get("rol", "empleado")
         conn = db.get_connection()
-        existente = conn.execute("SELECT id FROM usuarios WHERE username=?", (username,)).fetchone()
+        existente = conn.execute("SELECT id FROM usuarios WHERE username=%s", (username,)).fetchone()
         if existente:
             flash(f"Ya existe un usuario con el nombre de usuario '{username}'.", "danger")
             conn.close()
             return redirect(url_for("usuarios_nuevo"))
 
         password_temporal = db._generar_password_temporal()
+        # fecha_creacion queda afuera: la columna es timestamptz NOT NULL
+        # DEFAULT now(), mismo criterio ya usado en compras/cuenta corriente
+        # para no pisar el default con un valor de solo fecha.
         conn.execute(
-            """INSERT INTO usuarios (username, password_hash, nombre, rol, activo, debe_cambiar_password, fecha_creacion)
-               VALUES (?, ?, ?, ?, 1, 1, ?)""",
-            (username, generate_password_hash(password_temporal), nombre, rol, datetime.now().strftime("%Y-%m-%d")),
+            """INSERT INTO usuarios (username, password_hash, nombre, rol, activo, debe_cambiar_password)
+               VALUES (%s, %s, %s, %s, TRUE, TRUE)""",
+            (username, generate_password_hash(password_temporal), nombre, rol),
         )
         conn.commit()
         conn.close()
@@ -2088,7 +2098,7 @@ def usuarios_nuevo():
     return render_template("usuario_form.html", usuario=None)
 
 
-@app.route("/usuarios/<int:usuario_id>/editar", methods=["GET", "POST"])
+@app.route("/usuarios/<uuid:usuario_id>/editar", methods=["GET", "POST"])
 def usuarios_editar(usuario_id):
     if not es_admin():
         flash("Solo un administrador puede hacer esto.", "danger")
@@ -2097,21 +2107,21 @@ def usuarios_editar(usuario_id):
     if request.method == "POST":
         nombre = request.form.get("nombre", "").strip()
         rol = request.form.get("rol", "empleado")
-        activo = 1 if request.form.get("activo") else 0
+        activo = bool(request.form.get("activo"))
         conn.execute(
-            "UPDATE usuarios SET nombre=?, rol=?, activo=? WHERE id=?",
+            "UPDATE usuarios SET nombre=%s, rol=%s, activo=%s WHERE id=%s",
             (nombre, rol, activo, usuario_id),
         )
         conn.commit()
         conn.close()
         flash("Usuario actualizado.", "success")
         return redirect(url_for("usuarios_lista"))
-    usuario = conn.execute("SELECT * FROM usuarios WHERE id=?", (usuario_id,)).fetchone()
+    usuario = conn.execute("SELECT * FROM usuarios WHERE id=%s", (usuario_id,)).fetchone()
     conn.close()
     return render_template("usuario_form.html", usuario=usuario)
 
 
-@app.route("/usuarios/<int:usuario_id>/resetear-password", methods=["POST"])
+@app.route("/usuarios/<uuid:usuario_id>/resetear-password", methods=["POST"])
 def usuarios_resetear_password(usuario_id):
     if not es_admin():
         flash("Solo un administrador puede hacer esto.", "danger")
@@ -2119,7 +2129,7 @@ def usuarios_resetear_password(usuario_id):
     conn = db.get_connection()
     password_temporal = db._generar_password_temporal()
     conn.execute(
-        "UPDATE usuarios SET password_hash=?, debe_cambiar_password=1, intentos_fallidos=0, bloqueado_hasta=NULL WHERE id=?",
+        "UPDATE usuarios SET password_hash=%s, debe_cambiar_password=true, intentos_fallidos=0, bloqueado_hasta=NULL WHERE id=%s",
         (generate_password_hash(password_temporal), usuario_id),
     )
     conn.commit()
@@ -2131,16 +2141,16 @@ def usuarios_resetear_password(usuario_id):
     return redirect(url_for("usuarios_lista"))
 
 
-@app.route("/usuarios/<int:usuario_id>/eliminar", methods=["POST"])
+@app.route("/usuarios/<uuid:usuario_id>/eliminar", methods=["POST"])
 def usuarios_eliminar(usuario_id):
     if not es_admin():
         flash("Solo un administrador puede hacer esto.", "danger")
         return redirect(url_for("dashboard"))
-    if usuario_id == session.get("usuario_id"):
+    if str(usuario_id) == str(session.get("usuario_id")):
         flash("No podés eliminar tu propio usuario mientras estás conectado con él.", "danger")
         return redirect(url_for("usuarios_lista"))
     conn = db.get_connection()
-    conn.execute("DELETE FROM usuarios WHERE id=?", (usuario_id,))
+    conn.execute("DELETE FROM usuarios WHERE id=%s", (usuario_id,))
     conn.commit()
     conn.close()
     flash("Usuario eliminado.", "info")
@@ -2163,7 +2173,7 @@ def _carrito_detalle(conn):
     items = []
     total = 0
     for producto_id_str, cantidad in carrito.items():
-        producto = conn.execute("SELECT * FROM productos WHERE id=?", (int(producto_id_str),)).fetchone()
+        producto = conn.execute("SELECT * FROM productos WHERE id=%s", (int(producto_id_str),)).fetchone()
         if not producto:
             continue
         # nunca dejamos pedir más de lo que hay disponible ahora mismo
@@ -2201,28 +2211,30 @@ def tienda_catalogo():
     parametros = []
     if q:
         like = f"%{q}%"
-        condiciones.append("(nombre LIKE ? OR marca LIKE ? OR modelo_compatible LIKE ?)")
+        # Tercer y último buscador del sistema: ILIKE, no LIKE -- en SQLite
+        # LIKE ya era case-insensitive para ASCII, en Postgres no.
+        condiciones.append("(nombre ILIKE %s OR marca ILIKE %s OR modelo_compatible ILIKE %s)")
         parametros += [like, like, like]
     if categoria:
-        condiciones.append("categoria = ?")
+        condiciones.append("categoria = %s")
         parametros.append(categoria)
     if marca:
-        condiciones.append("marca = ?")
+        condiciones.append("marca = %s")
         parametros.append(marca)
     if modelo:
-        condiciones.append("modelo_compatible = ?")
+        condiciones.append("modelo_compatible = %s")
         parametros.append(modelo)
     if precio_min:
         try:
-            condiciones.append("precio_venta >= ?")
-            parametros.append(float(precio_min))
-        except ValueError:
+            condiciones.append("precio_venta >= %s")
+            parametros.append(a_decimal(precio_min))
+        except (ValueError, InvalidOperation):
             precio_min = ""
     if precio_max:
         try:
-            condiciones.append("precio_venta <= ?")
-            parametros.append(float(precio_max))
-        except ValueError:
+            condiciones.append("precio_venta <= %s")
+            parametros.append(a_decimal(precio_max))
+        except (ValueError, InvalidOperation):
             precio_max = ""
 
     productos = conn.execute(
@@ -2263,7 +2275,7 @@ def tienda_carrito_agregar():
     producto_id = request.form.get("producto_id")
     cantidad = int(request.form.get("cantidad", 1) or 1)
     conn = db.get_connection()
-    producto = conn.execute("SELECT * FROM productos WHERE id=?", (producto_id,)).fetchone()
+    producto = conn.execute("SELECT * FROM productos WHERE id=%s", (producto_id,)).fetchone()
     conn.close()
     if not producto or producto["stock_actual"] <= 0:
         flash("Ese producto no está disponible.", "danger")
@@ -2331,14 +2343,14 @@ def tienda_checkout():
         cur = conn.cursor()
         cur.execute(
             """INSERT INTO pedidos_web (fecha, nombre_cliente, telefono, email, direccion, cuit_dni, total, estado)
-               VALUES (?, ?, ?, ?, ?, ?, ?, 'pendiente_pago')""",
+               VALUES (%s, %s, %s, %s, %s, %s, %s, 'pendiente_pago') RETURNING id""",
             (datetime.now().strftime("%Y-%m-%d"), nombre, telefono, email, direccion, cuit_dni, total),
         )
-        pedido_id = cur.lastrowid
+        pedido_id = cur.fetchone()["id"]
         for it in items:
             cur.execute(
                 """INSERT INTO pedido_web_items (pedido_id, producto_id, cantidad, precio_unitario, subtotal)
-                   VALUES (?, ?, ?, ?, ?)""",
+                   VALUES (%s, %s, %s, %s, %s)""",
                 (pedido_id, it["producto_id"], it["cantidad"], it["precio_unitario"], it["subtotal"]),
             )
         conn.commit()
@@ -2364,7 +2376,7 @@ def tienda_checkout():
 
 def _pedido_web_o_404(pedido_id):
     conn = db.get_connection()
-    pedido = conn.execute("SELECT * FROM pedidos_web WHERE id=?", (pedido_id,)).fetchone()
+    pedido = conn.execute("SELECT * FROM pedidos_web WHERE id=%s", (pedido_id,)).fetchone()
     conn.close()
     return pedido
 
@@ -2415,7 +2427,7 @@ def webhook_mercadopago():
         return "", 200
 
     conn = db.get_connection()
-    pedido = conn.execute("SELECT * FROM pedidos_web WHERE id=?", (pedido_id,)).fetchone()
+    pedido = conn.execute("SELECT * FROM pedidos_web WHERE id=%s", (pedido_id,)).fetchone()
     if not pedido:
         conn.close()
         return "", 200
@@ -2427,7 +2439,7 @@ def webhook_mercadopago():
     estado_pago = pago.get("status")  # approved | pending | rejected | in_process | ...
     if estado_pago != "approved":
         conn.execute(
-            "UPDATE pedidos_web SET estado=?, mp_payment_id=? WHERE id=?",
+            "UPDATE pedidos_web SET estado=%s, mp_payment_id=%s WHERE id=%s",
             (estado_pago or pedido["estado"], str(data_id), pedido_id),
         )
         conn.commit()
@@ -2436,36 +2448,36 @@ def webhook_mercadopago():
 
     # pago aprobado: buscamos o creamos el cliente, y generamos la venta real
     items_pedido = conn.execute(
-        "SELECT * FROM pedido_web_items WHERE pedido_id=?", (pedido_id,)
+        "SELECT * FROM pedido_web_items WHERE pedido_id=%s", (pedido_id,)
     ).fetchall()
 
     cliente_id = None
     if pedido["email"]:
-        cliente = conn.execute("SELECT id FROM clientes WHERE email=?", (pedido["email"],)).fetchone()
+        cliente = conn.execute("SELECT id FROM clientes WHERE email=%s", (pedido["email"],)).fetchone()
         if cliente:
             cliente_id = cliente["id"]
     if not cliente_id and pedido["telefono"]:
-        cliente = conn.execute("SELECT id FROM clientes WHERE telefono=?", (pedido["telefono"],)).fetchone()
+        cliente = conn.execute("SELECT id FROM clientes WHERE telefono=%s", (pedido["telefono"],)).fetchone()
         if cliente:
             cliente_id = cliente["id"]
     if not cliente_id:
         cur = conn.cursor()
         cur.execute(
-            "INSERT INTO clientes (nombre, telefono, email, direccion, cuit_dni, fecha_alta) VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO clientes (nombre, telefono, email, direccion, cuit_dni, fecha_alta) VALUES (%s, %s, %s, %s, %s, %s) RETURNING id",
             (
                 pedido["nombre_cliente"], pedido["telefono"], pedido["email"], pedido["direccion"],
                 pedido["cuit_dni"] or "",
                 datetime.now().strftime("%Y-%m-%d"),
             ),
         )
-        cliente_id = cur.lastrowid
+        cliente_id = cur.fetchone()["id"]
         conn.commit()
 
     items = [(it["producto_id"], it["cantidad"], it["precio_unitario"], it["subtotal"]) for it in items_pedido]
     venta_id, tipo_comprobante = registrar_venta(conn, cliente_id, "Mercado Pago", items)
 
     conn.execute(
-        "UPDATE pedidos_web SET estado='pagado', mp_payment_id=?, venta_id=? WHERE id=?",
+        "UPDATE pedidos_web SET estado='pagado', mp_payment_id=%s, venta_id=%s WHERE id=%s",
         (str(data_id), venta_id, pedido_id),
     )
     conn.commit()
