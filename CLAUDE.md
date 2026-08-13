@@ -739,24 +739,29 @@ Agregado después:
     puro del lado del cliente y, cuando falla, no hay request al servidor
     que testear. Si algún día se suma una suite a nivel navegador, este es
     un caso para incluir.
-  - **PENDIENTE — el mismo bug está vivo en
-    `templates/compra_revisar_factura.html`** (encontrado buscando si el
-    patrón se repetía; todavía **sin arreglar**, se dejó anotado en vez de
-    tocarlo en la misma tanda). Ahí el listener de `submit` desactiva
+  - **El mismo bug estaba vivo en `templates/compra_revisar_factura.html`,
+    y ahí era peor — arreglado también (13/08/2026)**. Se encontró buscando
+    si el patrón se repetía. El listener de `submit` desactivaba
     (`disabled = true`) los campos de las filas destildadas, con el mismo
-    problema de fondo: corre después de la validación nativa, así que
-    nunca llega a ejecutarse. Y acá pega en uso real, no en un caso raro:
-    una línea que el importador no pudo matchear arranca **destildada a
+    problema de fondo: corre después de la validación nativa, así que nunca
+    llegaba a ejecutarse. Y acá pegaba en uso real, no en un caso raro: una
+    línea que el importador no pudo matchear arranca **destildada a
     propósito** (`{{ "checked" if f.confianza != "sin_match" }}`) y con el
     buscador de producto **vacío pero `required`** — o sea, cualquier
-    factura con al menos una línea sin match deja la pantalla de revisión
-    imposible de confirmar, ni siquiera destildando todo. Reproducido con
-    un Excel sintético de 2 líneas que no matchean: `checkValidity()` da
-    `false` por los dos `.producto-buscar`, y el click en "Confirmar
-    compra" no genera ningún POST. El arreglo natural es el mismo criterio
-    que se usó acá (que `required` valga solo para las filas tildadas,
-    sincronizándolo cuando se tilda/destilda el check "Cargar", en vez de
-    depender del `disabled` dentro del `submit`).
+    factura con al menos una línea sin match dejaba la pantalla de revisión
+    imposible de confirmar, ni siquiera destildando todo. Agravante: el
+    `.producto-buscar` no tiene atributo `name`, así que ni siquiera entraba
+    en el `querySelectorAll('input[name]')` que el listener desactivaba —
+    aunque hubiera llegado a correr, no lo habría destrabado.
+    Arreglo con el mismo criterio: `sincronizarObligatoriosFila()` pone
+    `required` en buscador/cantidad/precio solo cuando la fila está tildada,
+    con un listener delegado en el `tbody` para las filas agregadas después.
+    Verificado en navegador (Playwright) contra el template real renderizado
+    con dos líneas sin match, comparando las dos versiones: con el código
+    previo `form.checkValidity()` da `false` señalando `.producto-buscar`;
+    con el arreglo da `true`, y al tildar una fila con el buscador vacío
+    vuelve a dar `false` señalando ese mismo campo — o sea que destraba el
+    caso roto sin apagar la validación.
 
 ## Migración a Postgres (13/08/2026) — Plan 1 de 2
 

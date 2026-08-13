@@ -282,6 +282,32 @@ function inicializarBuscador(fila) {
 
 document.querySelectorAll('#itemsBody tr').forEach(inicializarBuscador);
 
+// Los campos de una fila son obligatorios solo si la fila está tildada para
+// cargar. Sin esto, una línea que el importador no pudo matchear —que
+// arranca DESTILDADA a propósito y con el buscador vacío— dejaba la pantalla
+// imposible de confirmar: la validación nativa de HTML5 corre ANTES del
+// evento submit, así que el listener de más abajo (el que desactiva los
+// campos de las filas destildadas) nunca llegaba a ejecutarse. Mismo criterio
+// que en producto_form.html.
+function sincronizarObligatoriosFila(fila) {
+  const marcada = fila.querySelector('.fila-check').checked;
+  const campos = [
+    fila.querySelector('.producto-buscar'),
+    fila.querySelector('input[name="cantidad"]'),
+    fila.querySelector('input[name="precio_unitario"]'),
+  ];
+  campos.forEach(function(c) { if (c) c.required = marcada; });
+}
+
+// Delegado en el tbody para que valga también para las filas agregadas
+// después (clonadas del template, todavía no existen en este momento).
+document.getElementById('itemsBody').addEventListener('change', function(e) {
+  if (!e.target.classList.contains('fila-check')) return;
+  sincronizarObligatoriosFila(e.target.closest('tr'));
+});
+
+document.querySelectorAll('#itemsBody tr').forEach(sincronizarObligatoriosFila);
+
 function toggleProveedorNuevo(checkbox) {
   const bloque = document.getElementById('bloqueProveedorNuevo');
   const select = document.getElementById('proveedorSelect');
@@ -299,6 +325,7 @@ function agregarFila() {
   document.getElementById('itemsBody').appendChild(clone);
   const fila = document.getElementById('itemsBody').lastElementChild;
   inicializarBuscador(fila);
+  sincronizarObligatoriosFila(fila);
   return fila;
 }
 
