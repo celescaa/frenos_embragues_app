@@ -1499,6 +1499,19 @@ grep -rn "LIKE" core/ scripts/
 
 Esperado: solo `ILIKE`. Un `LIKE` suelto es un buscador roto en silencio.
 
+- [ ] **Paso 4b: Verificar que no quedó plata convertida con `float()`**
+
+```bash
+grep -rn "float(" core/ scripts/
+```
+
+Esperado: **sin resultados** sobre columnas de plata — todas deben pasar por
+`a_decimal()` (el helper de `core/app.py`, ver Tarea 5). Este chequeo existe
+porque el redondeo de Postgres al castear `float8` a `numeric(12,2)` absorbe
+el error del flotante para montos realistas, así que un `float()` reintroducido
+**no lo detecta ningún test de integración**: solo se lo caza leyendo el
+código o con un test unitario del helper.
+
 - [ ] **Paso 5: Correr la suite completa**
 
 ```bash
