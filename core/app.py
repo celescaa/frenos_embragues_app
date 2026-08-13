@@ -40,10 +40,9 @@ app = Flask(
 )
 
 # La clave de sesión se genera una sola vez y se guarda en un archivo local
-# (nunca hardcodeada en el código ni en el repositorio). Vive en la misma
-# carpeta que data.db (db.INSTANCE_DIR) para que en Docker quede en el
-# volumen persistente y no se pierda al recrear el contenedor.
-_SECRET_KEY_PATH = os.path.join(db.INSTANCE_DIR, ".secret_key")
+# (nunca hardcodeada en el código ni en el repositorio), en la raíz del
+# proyecto.
+_SECRET_KEY_PATH = os.path.join(PROJECT_ROOT, ".secret_key")
 if os.path.exists(_SECRET_KEY_PATH):
     with open(_SECRET_KEY_PATH) as _f:
         app.secret_key = _f.read().strip()

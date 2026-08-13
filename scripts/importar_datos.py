@@ -36,9 +36,7 @@ PLANTILLA_POR_DEFECTO = "plantillas/Plantilla_Carga_Datos.xlsx"
 # anterior o alguien la tipeó a mano distinto.
 @lru_cache(maxsize=1)
 def _categorias_validas():
-    # obtener_categorias() pasó a devolver filas completas (list[dict]) en
-    # vez de una lista de nombres — ver Tarea 4 de la migración a Postgres.
-    categorias_db = [c["nombre"] for c in db.obtener_categorias(solo_activas=False)]
+    categorias_db = db.obtener_categorias(solo_activas=False)
     validas = {nombre: nombre for nombre in categorias_db}
     validas.update(db.CATEGORIAS_RENOMBRADAS)
     return validas

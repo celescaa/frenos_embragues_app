@@ -46,20 +46,14 @@ def get_connection():
 
 
 # Categorías del catálogo (local y tienda online). Ya NO es la lista fija:
-# viven en la tabla `categorias`, editable desde /categorias. Esta lista era
-# también el dato de siembra inicial (antes cargado por _sembrar_categorias,
-# en Python, eliminada en la Tarea 4 de la migración a Postgres porque
-# correr eso en cada arranque en frío no tiene sentido en serverless).
-# OJO: esa siembra NO se movió a supabase/migrations/ — ver el comentario de
-# "Concerns" del reporte de la Tarea 4: el test dado verbatim para esta
-# tarea inserta una categoría llamada 'Frenos' asumiendo que la tabla
-# arranca vacía, lo que choca (UniqueViolation) si se la pre-siembra en la
-# migración. Por ahora la tabla `categorias` queda vacía después de un
-# `supabase db reset`; hay que cargarla a mano desde /categorias o resolver
-# ese conflicto antes de sumar la siembra a la migración. Esta lista se
-# conserva como dato de referencia y porque scripts/importar_datos.py
-# todavía la usa junto con CATEGORIAS_RENOMBRADAS para validar la categoría
-# de cada fila.
+# viven en la tabla `categorias`, editable desde /categorias. Esta lista es
+# el dato de siembra inicial, cargado ahora vía
+# supabase/migrations/20260813145208_esquema_inicial.sql (antes lo hacía
+# _sembrar_categorias, en Python, eliminada en la Tarea 4 de la migración a
+# Postgres porque correr eso en cada arranque en frío no tiene sentido en
+# serverless). Se conserva acá como dato de referencia y porque
+# scripts/importar_datos.py todavía la usa junto con CATEGORIAS_RENOMBRADAS
+# para validar la categoría de cada fila.
 CATEGORIAS_INICIALES = [
     "Frenos", "Embragues", "Correas", "Líquidos",
     "Rodamientos y Mazas", "Suspensión y Dirección", "Filtros",
@@ -69,9 +63,9 @@ CATEGORIAS_INICIALES = [
 
 # Subcategorías iniciales por categoría (taxonomía granular armada en otro
 # chat a partir de clasificar de punta a punta las listas de precios reales
-# de 5 proveedores — ~107.000 filas). Mismo caso que CATEGORIAS_INICIALES de
-# arriba: ya no se siembra sola (ni en Python ni en la migración de
-# Supabase), queda como dato de referencia/documentación.
+# de 5 proveedores — ~107.000 filas). Mismo criterio que CATEGORIAS_INICIALES
+# de arriba: el dato de siembra en sí ahora vive en la migración de
+# Supabase, esto queda como referencia/documentación del dato.
 SUBCATEGORIAS_INICIALES = {
     "Correas": ["Correas", "Tensores y poleas"],
     "Embragues": [
@@ -106,21 +100,20 @@ CATEGORIAS_RENOMBRADAS = {"Freno": "Frenos", "Embrague": "Embragues", "Otro": "O
 
 
 def obtener_categorias(conn=None, solo_activas=True):
-    """Categorías cargadas en la tabla `categorias`, para dropdowns y
-    validación. Devuelve filas completas (id, nombre, activo) — mismo
-    patrón que obtener_subcategorias — en vez de solo una lista de nombres.
-    Si no se pasa una conexión abierta, abre y cierra una propia."""
+    """Nombres de categorías cargadas en la tabla `categorias`, para
+    dropdowns y validación. Si no se pasa una conexión abierta, abre y
+    cierra una propia."""
     conn_propia = conn is None
     if conn_propia:
         conn = get_connection()
-    consulta = "SELECT * FROM categorias"
+    consulta = "SELECT nombre FROM categorias"
     if solo_activas:
         consulta += " WHERE activo = true"
     consulta += " ORDER BY nombre"
-    filas = conn.execute(consulta).fetchall()
+    nombres = [r["nombre"] for r in conn.execute(consulta)]
     if conn_propia:
         conn.close()
-    return filas
+    return nombres
 
 
 def obtener_subcategorias(conn=None, categoria_id=None, solo_activas=True):

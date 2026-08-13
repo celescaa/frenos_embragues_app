@@ -18,11 +18,17 @@ def _producto(conn, nombre="Pastilla X"):
 
 
 def test_obtener_categorias_devuelve_solo_activas(db_conn):
-    db_conn.execute("INSERT INTO categorias (nombre, activo) VALUES ('Frenos', true)")
-    db_conn.execute("INSERT INTO categorias (nombre, activo) VALUES ('Vieja', false)")
-    nombres = [c["nombre"] for c in db.obtener_categorias(db_conn, solo_activas=True)]
-    assert "Frenos" in nombres
-    assert "Vieja" not in nombres
+    """Usa nombres propios de este test: las categorías iniciales ya vienen
+    sembradas por la migración, así que insertar una de ellas chocaría."""
+    db_conn.execute(
+        "INSERT INTO categorias (nombre, activo) VALUES ('Rubro de prueba activo', true)"
+    )
+    db_conn.execute(
+        "INSERT INTO categorias (nombre, activo) VALUES ('Rubro de prueba inactivo', false)"
+    )
+    nombres = db.obtener_categorias(db_conn, solo_activas=True)
+    assert "Rubro de prueba activo" in nombres
+    assert "Rubro de prueba inactivo" not in nombres
 
 
 def test_mejor_precio_ignora_proveedores_desactivados(db_conn):

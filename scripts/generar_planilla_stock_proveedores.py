@@ -90,9 +90,7 @@ def _escribir_hoja(wb, nombre_hoja, categorias, con_nota_identificacion=False):
 def generar(salida=SALIDA_POR_DEFECTO):
     conn = db.get_connection()
     proveedores = conn.execute("SELECT nombre FROM proveedores WHERE activo=1 ORDER BY nombre").fetchall()
-    # obtener_categorias() pasó a devolver filas completas (list[dict]) en
-    # vez de una lista de nombres — ver Tarea 4 de la migración a Postgres.
-    categorias = [c["nombre"] for c in db.obtener_categorias(conn)]
+    categorias = db.obtener_categorias(conn)
     conn.close()
 
     wb = openpyxl.Workbook()

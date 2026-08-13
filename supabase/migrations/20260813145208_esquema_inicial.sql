@@ -323,3 +323,83 @@ CREATE TABLE promocion_productos (
     promocion_id INTEGER NOT NULL REFERENCES promociones_aplicadas(id),
     producto_id INTEGER NOT NULL REFERENCES productos(id)
 );
+
+-- ---------------------------------------------------------------------
+-- Datos iniciales de categorías/subcategorías. Antes se sembraban en
+-- Python al arrancar la app (_sembrar_categorias/_sembrar_subcategorias
+-- en core/database.py); esa siembra se eliminó en la Tarea 4 de la
+-- migración a Postgres (correr código de siembra en cada arranque en frío
+-- no tiene sentido en serverless) y pasa a vivir acá. Los datos en sí
+-- (CATEGORIAS_INICIALES / SUBCATEGORIAS_INICIALES) siguen documentados en
+-- core/database.py como referencia, aunque ya no los siembra Python.
+-- ON CONFLICT DO NOTHING: si se vuelve a aplicar esta migración sobre una
+-- base que ya tiene estas filas (o alguien ya las tocó a mano desde
+-- /categorias), no la pisa.
+-- ---------------------------------------------------------------------
+INSERT INTO categorias (nombre) VALUES
+    ('Frenos'),
+    ('Embragues'),
+    ('Correas'),
+    ('Líquidos'),
+    ('Rodamientos y Mazas'),
+    ('Suspensión y Dirección'),
+    ('Filtros'),
+    ('Retenes y Juntas'),
+    ('Transmisión'),
+    ('Motor'),
+    ('Ferretería'),
+    ('Otros')
+ON CONFLICT (nombre) DO NOTHING;
+
+INSERT INTO subcategorias (nombre, categoria_id)
+SELECT v.subcategoria_nombre, c.id
+FROM (VALUES
+    ('Correas', 'Correas'),
+    ('Correas', 'Tensores y poleas'),
+    ('Embragues', 'Bombas y cilindros'),
+    ('Embragues', 'Crapodinas y collarines'),
+    ('Embragues', 'Discos y platos'),
+    ('Embragues', 'Otros de embrague'),
+    ('Embragues', 'Volantes bimasa'),
+    ('Frenos', 'Pastillas'),
+    ('Frenos', 'Discos'),
+    ('Frenos', 'Campanas'),
+    ('Frenos', 'Zapatas'),
+    ('Frenos', 'Seguros antirruido'),
+    ('Frenos', 'Válvulas y actuadores'),
+    ('Frenos', 'Cables y sensores de desgaste'),
+    ('Frenos', 'Mangueras y flexibles'),
+    ('Frenos', 'Cables y cintas'),
+    ('Frenos', 'Bombas y cilindros'),
+    ('Frenos', 'Otros de frenos'),
+    ('Rodamientos y Mazas', 'Mazas de rueda'),
+    ('Rodamientos y Mazas', 'Rodamientos y rulemanes'),
+    ('Suspensión y Dirección', 'Amortiguadores'),
+    ('Suspensión y Dirección', 'Parrillas y bujes'),
+    ('Suspensión y Dirección', 'Rótulas y extremos'),
+    ('Suspensión y Dirección', 'Bieletas'),
+    ('Suspensión y Dirección', 'Cremalleras y bombas de dirección'),
+    ('Suspensión y Dirección', 'Otros de suspensión/dirección'),
+    ('Filtros', 'Filtro de aire'),
+    ('Filtros', 'Filtro de aceite'),
+    ('Filtros', 'Filtro de combustible'),
+    ('Retenes y Juntas', 'Retenes'),
+    ('Retenes y Juntas', 'Juntas'),
+    ('Retenes y Juntas', 'Diafragmas'),
+    ('Transmisión', 'Homocinéticas'),
+    ('Transmisión', 'Semiejes y palieres'),
+    ('Transmisión', 'Crucetas'),
+    ('Transmisión', 'Coronas y diferencial'),
+    ('Transmisión', 'Otros de transmisión'),
+    ('Motor', 'Comando'),
+    ('Motor', 'Encendido'),
+    ('Motor', 'Refrigeración'),
+    ('Motor', 'Vacío y servofreno'),
+    ('Motor', 'Otros de motor'),
+    ('Ferretería', 'Tuercas'),
+    ('Ferretería', 'Arandelas'),
+    ('Ferretería', 'Bulones'),
+    ('Ferretería', 'Tornillos')
+) AS v(categoria_nombre, subcategoria_nombre)
+JOIN categorias c ON c.nombre = v.categoria_nombre
+ON CONFLICT (categoria_id, nombre) DO NOTHING;
