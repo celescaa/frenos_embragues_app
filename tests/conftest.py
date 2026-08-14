@@ -148,15 +148,11 @@ def crear_usuario(db_conn):
             {"email": email, "password": password, "email_confirm": True}
         )
         usuario_id = cuenta.user.id
-        # password_hash se sigue escribiendo MIENTRAS DURE LA TRANSICIÓN: la
-        # columna todavía existe. Se saca junto con ella.
-        from werkzeug.security import generate_password_hash
         db_conn.execute(
-            """INSERT INTO usuarios (id, username, email, password_hash, nombre, rol,
+            """INSERT INTO usuarios (id, username, email, nombre, rol,
                                      activo, debe_cambiar_password)
-               VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
-            (usuario_id, username, email, generate_password_hash(password), nombre,
-             rol, activo, debe_cambiar_password),
+               VALUES (%s, %s, %s, %s, %s, %s, %s)""",
+            (usuario_id, username, email, nombre, rol, activo, debe_cambiar_password),
         )
         db_conn.commit()
         return {"id": usuario_id, "username": username, "email": email,

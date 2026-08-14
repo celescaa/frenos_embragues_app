@@ -90,12 +90,14 @@ def test_usuarios_tiene_email_unico(db_conn, crear_usuario):
         )
 
 
-def test_el_hash_de_contrasena_ya_no_es_obligatorio(db_conn):
-    """Los usuarios creados vía Supabase Auth no tienen hash propio: su
-    contraseña vive del otro lado. La columna se borra del todo más adelante,
-    cuando ya no la lea nadie."""
-    fila = db_conn.execute(
-        """SELECT is_nullable FROM information_schema.columns
-           WHERE table_name='usuarios' AND column_name='password_hash'"""
-    ).fetchone()
-    assert fila["is_nullable"] == "YES"
+def test_ya_no_se_guardan_hashes_de_contrasena(db_conn):
+    """Las credenciales viven solo en Supabase Auth. La columna se borró para
+    no dejar hashes viejos en la base: es un dato sensible que ya no cumple
+    ninguna función."""
+    columnas = [
+        fila["column_name"] for fila in db_conn.execute(
+            "SELECT column_name FROM information_schema.columns WHERE table_name='usuarios'"
+        )
+    ]
+    assert "password_hash" not in columnas
+    assert "email" in columnas

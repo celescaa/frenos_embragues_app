@@ -16,7 +16,6 @@ from flask_wtf import CSRFProtect
 from flask_wtf.csrf import CSRFError
 from datetime import datetime, timedelta, timezone
 from werkzeug.middleware.proxy_fix import ProxyFix
-from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 from dotenv import load_dotenv
 from urllib.parse import urlparse
