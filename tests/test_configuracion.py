@@ -62,3 +62,41 @@ def test_importar_la_app_no_siembra_datos_de_ejemplo(db_conn):
 
     cuantos = db_conn.execute("SELECT COUNT(*) AS c FROM productos").fetchone()["c"]
     assert cuantos == 0, "importar core.app sembró datos de ejemplo"
+
+
+def test_sin_secret_key_y_sin_disco_el_error_dice_que_falta_la_variable(tmp_path, monkeypatch):
+    """En Vercel el filesystem es de solo lectura. Sin SECRET_KEY, el sistema
+    intentaba crear el archivo .secret_key y moría con un PermissionError
+    sobre un archivo oculto -- un mensaje que no sugiere en ningún momento
+    cuál es la variable que hay que cargar.
+
+    Se corta en vez de seguir con una clave en memoria a propósito: esa clave
+    sería distinta en cada arranque en frío, así que las sesiones se cerrarían
+    solas y el problema aparecería como "me desloguea todo el tiempo".
+    """
+    import subprocess
+    import sys
+    import shutil
+
+    proyecto = tmp_path / "proy"
+    shutil.copytree(
+        os.path.dirname(os.path.dirname(os.path.abspath(__file__))),
+        proyecto,
+        ignore=shutil.ignore_patterns(".git", "__pycache__", "*.pyc", "supabase",
+                                      ".pytest_cache", "listas_proveedores"),
+    )
+    (proyecto / ".secret_key").unlink(missing_ok=True)
+    proyecto.chmod(0o555)  # solo lectura, como en Vercel
+    try:
+        entorno = dict(os.environ)
+        entorno.pop("SECRET_KEY", None)
+        resultado = subprocess.run(
+            [sys.executable, "-c", "from app import app"],
+            cwd=proyecto, env=entorno, capture_output=True, text=True,
+        )
+        assert resultado.returncode != 0
+        assert "SECRET_KEY" in resultado.stderr, (
+            "el error no nombra la variable que falta:\n" + resultado.stderr[-500:]
+        )
+    finally:
+        proyecto.chmod(0o755)

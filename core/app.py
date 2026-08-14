@@ -58,8 +58,28 @@ else:
             app.secret_key = _f.read().strip()
     else:
         app.secret_key = secrets.token_hex(32)
-        with open(_SECRET_KEY_PATH, "w") as _f:
-            _f.write(app.secret_key)
+        try:
+            with open(_SECRET_KEY_PATH, "w") as _f:
+                _f.write(app.secret_key)
+        except OSError as e:
+            # Pasa en Vercel (y en cualquier serverless) si SECRET_KEY quedó
+            # sin definir: el filesystem es de solo lectura, así que el
+            # archivo no se puede crear. Sin este mensaje, lo único que se ve
+            # en el log es un PermissionError sobre un archivo oculto, que no
+            # sugiere en ningún momento cuál es la variable que falta.
+            #
+            # Se corta en vez de seguir con una clave en memoria a propósito:
+            # esa clave sería distinta en cada arranque en frío, así que las
+            # sesiones se cerrarían solas cada pocos minutos y el problema
+            # aparecería como "el sistema me desloguea todo el tiempo", mucho
+            # más difícil de rastrear hasta acá.
+            raise RuntimeError(
+                "Falta la variable de entorno SECRET_KEY y no se puede escribir "
+                f"el archivo {_SECRET_KEY_PATH} ({e}). En un hosting sin disco "
+                "de escritura (Vercel) SECRET_KEY es obligatoria: generala con "
+                "`python -c \"import secrets; print(secrets.token_hex(32))\"` y "
+                "cargala en las variables de entorno del proyecto."
+            ) from e
 
 csrf = CSRFProtect(app)
 # El default de Flask-WTF (WTF_CSRF_TIME_LIMIT = 3600s = 1 hora) es mucho más
