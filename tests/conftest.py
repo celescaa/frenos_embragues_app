@@ -108,6 +108,18 @@ os.environ.setdefault("SUPABASE_ANON_KEY", SUPABASE_ANON_KEY_TEST)
 os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", SUPABASE_SERVICE_KEY_TEST)
 
 
+def _borrar_cuentas_de_prueba():
+    """Vacía Supabase Auth de la instancia de pruebas."""
+    from supabase import create_client
+
+    admin = create_client(SUPABASE_URL_TEST, SUPABASE_SERVICE_KEY_TEST)
+    try:
+        for cuenta in admin.auth.admin.list_users():
+            admin.auth.admin.delete_user(cuenta.id)
+    except Exception:
+        pass  # sin Supabase local levantado, los tests de auth ya fallan solos
+
+
 @pytest.fixture
 def crear_usuario(db_conn):
     """Crea un usuario completo: la cuenta en Supabase Auth (donde viven email
@@ -120,15 +132,13 @@ def crear_usuario(db_conn):
     `email_confirm=True` es obligatorio -- sin eso la cuenta queda pendiente
     de confirmación por mail y no puede iniciar sesión.
 
-    Lleva su propia limpieza porque el fixture `_limpiar_base_de_pruebas`
-    trunca la tabla `usuarios` pero NO borra las cuentas del lado de Supabase:
-    sin esto, la segunda corrida de la suite fallaría con "email ya
-    registrado".
+    La limpieza la hace `_limpiar_base_de_pruebas` para TODAS las cuentas, no
+    solo las de este fixture: varios tests crean usuarios a través de la
+    pantalla `/usuarios/nuevo`, que también deja una cuenta en Supabase.
     """
     from supabase import create_client
 
     admin = create_client(SUPABASE_URL_TEST, SUPABASE_SERVICE_KEY_TEST)
-    creados = []
 
     def _crear(username, password="clave-de-prueba-123", rol="empleado",
                nombre="Usuario Test", activo=True, debe_cambiar_password=False,
@@ -138,10 +148,8 @@ def crear_usuario(db_conn):
             {"email": email, "password": password, "email_confirm": True}
         )
         usuario_id = cuenta.user.id
-        creados.append(usuario_id)
-        # password_hash se sigue escribiendo MIENTRAS DURE LA TRANSICIÓN: el
-        # login todavía valida contra esa columna, y lo hará hasta que el
-        # código pase a Supabase Auth. Se saca junto con la columna.
+        # password_hash se sigue escribiendo MIENTRAS DURE LA TRANSICIÓN: la
+        # columna todavía existe. Se saca junto con ella.
         from werkzeug.security import generate_password_hash
         db_conn.execute(
             """INSERT INTO usuarios (id, username, email, password_hash, nombre, rol,
@@ -154,13 +162,7 @@ def crear_usuario(db_conn):
         return {"id": usuario_id, "username": username, "email": email,
                 "password": password, "rol": rol, "nombre": nombre}
 
-    yield _crear
-
-    for usuario_id in creados:
-        try:
-            admin.auth.admin.delete_user(usuario_id)
-        except Exception:
-            pass  # el propio test pudo haberlo borrado ya
+    return _crear
 
 
 @pytest.fixture
@@ -189,8 +191,16 @@ def _limpiar_base_de_pruebas(pg_url):
     `db.SUBCATEGORIAS_INICIALES` -- la misma fuente de la que sale la
     siembra real de la migración -- porque son datos de referencia de los
     que dependen tanto la app (dropdowns, validación) como varios tests.
+
+    Y borra las cuentas de Supabase Auth, que el TRUNCATE no alcanza: viven
+    en otro servicio. Se borran TODAS y no solo las que creó un fixture,
+    porque varios tests dan de alta usuarios a través de `/usuarios/nuevo`,
+    que también crea su cuenta. Sin esto, la segunda corrida de la suite
+    falla con "email ya registrado". Es seguro porque `pytest_configure` ya
+    verificó que estamos apuntando a la base de pruebas de este proyecto.
     """
     yield
+    _borrar_cuentas_de_prueba()
     conn = psycopg.connect(pg_url, row_factory=dict_row)
     try:
         conn.execute("TRUNCATE TABLE " + ", ".join(TABLAS) + " RESTART IDENTITY CASCADE")

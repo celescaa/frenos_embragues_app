@@ -179,3 +179,109 @@ def test_una_contrasena_corta_no_se_guarda_en_supabase(cliente, crear_usuario):
     cliente.post("/login", data={"username": "matias", "password": "corta"})
     with cliente.session_transaction() as sesion:
         assert "usuario_id" not in sesion
+
+
+# ---------------------------------------------------------------------------
+# Gestión de usuarios (/usuarios). El alta tiene que dejar la cuenta lista de
+# punta a punta: si creara el perfil pero no la cuenta, la persona nueva no
+# podría entrar y nadie se enteraría hasta que lo intentara.
+# ---------------------------------------------------------------------------
+import re
+
+
+def _sesion_admin(cliente, crear_usuario, username="jefe"):
+    admin = crear_usuario(username, rol="admin", password="clave-admin-123")
+    cliente.post("/login", data={"username": username, "password": "clave-admin-123"})
+    return admin
+
+
+def _temporal_del_mensaje(datos):
+    """La contraseña temporal se muestra una sola vez, en el mensaje."""
+    match = re.search(r"temporal:\s*(\S+?)\s", datos.decode())
+    assert match, "no se mostró la contraseña temporal"
+    return match.group(1)
+
+
+def test_un_admin_crea_un_usuario_que_puede_entrar(cliente, crear_usuario, db_conn):
+    _sesion_admin(cliente, crear_usuario)
+    respuesta = cliente.post("/usuarios/nuevo", data={
+        "username": "empleado_nuevo", "email": "empleado_nuevo@ejemplo.test",
+        "nombre": "Empleado Nuevo", "rol": "empleado",
+    }, follow_redirects=True)
+    temporal = _temporal_del_mensaje(respuesta.data)
+
+    fila = db_conn.execute(
+        "SELECT id, email, debe_cambiar_password FROM usuarios WHERE username=%s",
+        ("empleado_nuevo",),
+    ).fetchone()
+    assert fila is not None, "no se creó el perfil"
+    assert fila["email"] == "empleado_nuevo@ejemplo.test"
+    assert fila["debe_cambiar_password"] is True
+
+    cliente.get("/logout")
+    cliente.post("/login", data={"username": "empleado_nuevo", "password": temporal})
+    with cliente.session_transaction() as sesion:
+        assert sesion.get("usuario_id") == str(fila["id"])
+        assert sesion.get("debe_cambiar_password") is True
+
+
+def test_no_se_crea_el_perfil_si_falla_la_cuenta(cliente, crear_usuario, db_conn):
+    """Un email ya usado hace fallar la creación de la cuenta. El perfil no
+    tiene que quedar igual: sería alguien con rol y permisos pero sin forma de
+    autenticarse."""
+    admin = _sesion_admin(cliente, crear_usuario)
+    cliente.post("/usuarios/nuevo", data={
+        "username": "colado", "email": admin["email"],
+        "nombre": "Colado", "rol": "empleado",
+    }, follow_redirects=True)
+
+    fila = db_conn.execute(
+        "SELECT id FROM usuarios WHERE username=%s", ("colado",)
+    ).fetchone()
+    assert fila is None
+
+
+def test_borrar_un_usuario_borra_tambien_su_cuenta(cliente, crear_usuario, db_conn):
+    """Si quedara la cuenta viva sin perfil, esa persona seguiría pudiendo
+    autenticarse contra Supabase."""
+    _sesion_admin(cliente, crear_usuario)
+    victima = crear_usuario("se_va", password="clave-123")
+
+    cliente.post(f"/usuarios/{victima['id']}/eliminar")
+
+    assert db_conn.execute(
+        "SELECT id FROM usuarios WHERE id=%s", (victima["id"],)
+    ).fetchone() is None
+
+    from core import supabase_auth
+    cuentas = supabase_auth.cliente_admin().auth.admin.list_users()
+    assert victima["id"] not in [c.id for c in cuentas]
+
+
+def test_resetear_la_contrasena_da_una_temporal_que_funciona(cliente, crear_usuario, db_conn):
+    _sesion_admin(cliente, crear_usuario)
+    olvidadizo = crear_usuario("olvidadizo", password="la-que-olvido-123")
+
+    respuesta = cliente.post(
+        f"/usuarios/{olvidadizo['id']}/resetear-password", follow_redirects=True
+    )
+    temporal = _temporal_del_mensaje(respuesta.data)
+
+    cliente.get("/logout")
+    cliente.post("/login", data={"username": "olvidadizo", "password": temporal})
+    with cliente.session_transaction() as sesion:
+        assert sesion.get("usuario_id") == olvidadizo["id"]
+        assert sesion.get("debe_cambiar_password") is True
+
+
+def test_el_reseteo_invalida_la_contrasena_anterior(cliente, crear_usuario):
+    """Resetear es lo que hace un admin cuando alguien perdió el acceso o se
+    fue: la contraseña vieja tiene que dejar de servir."""
+    _sesion_admin(cliente, crear_usuario)
+    olvidadizo = crear_usuario("olvidadizo", password="la-que-olvido-123")
+    cliente.post(f"/usuarios/{olvidadizo['id']}/resetear-password", follow_redirects=True)
+
+    cliente.get("/logout")
+    cliente.post("/login", data={"username": "olvidadizo", "password": "la-que-olvido-123"})
+    with cliente.session_transaction() as sesion:
+        assert "usuario_id" not in sesion

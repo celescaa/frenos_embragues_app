@@ -198,7 +198,8 @@ def test_usuarios_nuevo_crea_usuario_activo_con_booleanos_reales(client_admin, d
     client, _ = client_admin
     respuesta = client.post(
         "/usuarios/nuevo",
-        data={"username": "nuevo_empleado", "nombre": "Nuevo Empleado", "rol": "empleado"},
+        data={"username": "nuevo_empleado", "email": "nuevo_empleado@ejemplo.test",
+              "nombre": "Nuevo Empleado", "rol": "empleado"},
         follow_redirects=True,
     )
     assert respuesta.status_code == 200

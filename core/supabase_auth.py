@@ -89,3 +89,41 @@ def cambiar_password(usuario_id, nueva):
     except Exception:
         return False
     return True
+
+
+def crear_cuenta(email, password):
+    """Crea la cuenta en Supabase Auth y devuelve su id, o None si falló.
+
+    `email_confirm=True` no es opcional: sin eso la cuenta queda pendiente de
+    confirmación por mail y no puede iniciar sesión. Acá el alta la hace un
+    administrador del negocio en persona, así que no hay nada que confirmar.
+
+    Quien llama tiene que crear la cuenta ANTES del perfil: si el perfil se
+    creara primero y esto fallara, quedaría alguien con rol y permisos pero
+    sin forma de autenticarse.
+    """
+    if not _clave_de_servicio() or not _url():
+        return None
+    try:
+        respuesta = cliente_admin().auth.admin.create_user(
+            {"email": email, "password": password, "email_confirm": True}
+        )
+    except Exception:
+        return None  # email inválido, ya registrado, servicio caído
+    return respuesta.user.id if respuesta and respuesta.user else None
+
+
+def borrar_cuenta(usuario_id):
+    """Borra la cuenta. La fila de `usuarios` se va sola por ON DELETE CASCADE.
+
+    Se borra la cuenta y NO el perfil por separado: si el DELETE local saliera
+    bien y el borrado de la cuenta fallara, quedaría alguien que todavía puede
+    autenticarse contra Supabase pero ya no tiene perfil ni rol.
+    """
+    if not _clave_de_servicio() or not _url():
+        return False
+    try:
+        cliente_admin().auth.admin.delete_user(str(usuario_id))
+    except Exception:
+        return False
+    return True

@@ -2142,23 +2142,38 @@ def usuarios_nuevo():
         return redirect(url_for("dashboard"))
     if request.method == "POST":
         username = request.form.get("username", "").strip()
+        email = request.form.get("email", "").strip()
         nombre = request.form.get("nombre", "").strip()
         rol = request.form.get("rol", "empleado")
         conn = db.get_connection()
-        existente = conn.execute("SELECT id FROM usuarios WHERE username=%s", (username,)).fetchone()
+        existente = conn.execute(
+            "SELECT id FROM usuarios WHERE username=%s OR email=%s", (username, email)
+        ).fetchone()
         if existente:
-            flash(f"Ya existe un usuario con el nombre de usuario '{username}'.", "danger")
+            flash("Ya existe un usuario con ese nombre de usuario o ese email.", "danger")
             conn.close()
             return redirect(url_for("usuarios_nuevo"))
 
         password_temporal = db._generar_password_temporal()
+        # Primero la cuenta: su id es el que va a llevar el perfil. Si esto
+        # falla no se escribe nada en nuestra tabla, así que nunca queda un
+        # perfil con rol y permisos pero sin forma de autenticarse.
+        usuario_id = supabase_auth.crear_cuenta(email, password_temporal)
+        if not usuario_id:
+            flash(
+                "No se pudo crear la cuenta. Revisá que el email sea válido y que no esté en uso.",
+                "danger",
+            )
+            conn.close()
+            return redirect(url_for("usuarios_nuevo"))
+
         # fecha_creacion queda afuera: la columna es timestamptz NOT NULL
         # DEFAULT now(), mismo criterio ya usado en compras/cuenta corriente
         # para no pisar el default con un valor de solo fecha.
         conn.execute(
-            """INSERT INTO usuarios (username, password_hash, nombre, rol, activo, debe_cambiar_password)
-               VALUES (%s, %s, %s, %s, TRUE, TRUE)""",
-            (username, generate_password_hash(password_temporal), nombre, rol),
+            """INSERT INTO usuarios (id, username, email, nombre, rol, activo, debe_cambiar_password)
+               VALUES (%s, %s, %s, %s, %s, TRUE, TRUE)""",
+            (usuario_id, username, email, nombre, rol),
         )
         conn.commit()
         conn.close()
@@ -2201,9 +2216,17 @@ def usuarios_resetear_password(usuario_id):
         return redirect(url_for("dashboard"))
     conn = db.get_connection()
     password_temporal = db._generar_password_temporal()
+    # La contraseña vive en Supabase: primero se cambia allá. Si fallara y de
+    # este lado ya hubiéramos marcado el cambio obligatorio, la persona
+    # quedaría con la contraseña vieja pero obligada a cambiarla con una
+    # temporal que nunca existió.
+    if not supabase_auth.cambiar_password(usuario_id, password_temporal):
+        flash("No se pudo resetear la contraseña. Probá de nuevo en un momento.", "danger")
+        conn.close()
+        return redirect(url_for("usuarios_lista"))
     conn.execute(
-        "UPDATE usuarios SET password_hash=%s, debe_cambiar_password=true, intentos_fallidos=0, bloqueado_hasta=NULL WHERE id=%s",
-        (generate_password_hash(password_temporal), usuario_id),
+        "UPDATE usuarios SET debe_cambiar_password=true, intentos_fallidos=0, bloqueado_hasta=NULL WHERE id=%s",
+        (usuario_id,),
     )
     conn.commit()
     conn.close()
@@ -2222,10 +2245,13 @@ def usuarios_eliminar(usuario_id):
     if str(usuario_id) == str(session.get("usuario_id")):
         flash("No podés eliminar tu propio usuario mientras estás conectado con él.", "danger")
         return redirect(url_for("usuarios_lista"))
-    conn = db.get_connection()
-    conn.execute("DELETE FROM usuarios WHERE id=%s", (usuario_id,))
-    conn.commit()
-    conn.close()
+    # Se borra la cuenta y el perfil se va solo (ON DELETE CASCADE). Hacer las
+    # dos cosas por separado abre la puerta a que el DELETE local salga bien y
+    # el borrado de la cuenta falle: quedaría alguien que todavía puede
+    # autenticarse contra Supabase pero ya no tiene perfil ni rol.
+    if not supabase_auth.borrar_cuenta(usuario_id):
+        flash("No se pudo eliminar el usuario. Probá de nuevo en un momento.", "danger")
+        return redirect(url_for("usuarios_lista"))
     flash("Usuario eliminado.", "info")
     return redirect(url_for("usuarios_lista"))
 
