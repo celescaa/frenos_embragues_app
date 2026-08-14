@@ -21,6 +21,7 @@ from werkzeug.utils import secure_filename
 from dotenv import load_dotenv
 from urllib.parse import urlparse
 from . import database as db
+from . import supabase_auth
 from . import facturacion_afip
 from . import tienda_pagos
 from . import importar_factura
@@ -168,10 +169,21 @@ def login():
         return redirect(url_for("dashboard"))
 
     if request.method == "POST":
-        username = request.form.get("username", "").strip()
+        identificador = request.form.get("username", "").strip()
         password = request.form.get("password", "")
         conn = db.get_connection()
-        usuario = conn.execute("SELECT * FROM usuarios WHERE username = %s", (username,)).fetchone()
+
+        # Se admite entrar con el nombre de usuario o con el email. Supabase
+        # Auth solo entiende de emails, así que un username se traduce contra
+        # nuestra propia tabla antes de preguntarle a Supabase.
+        if "@" in identificador:
+            usuario = conn.execute(
+                "SELECT * FROM usuarios WHERE email = %s", (identificador,)
+            ).fetchone()
+        else:
+            usuario = conn.execute(
+                "SELECT * FROM usuarios WHERE username = %s", (identificador,)
+            ).fetchone()
 
         # ¿La cuenta está bloqueada por intentos fallidos? bloqueado_hasta es
         # timestamptz: psycopg ya lo devuelve como datetime tz-aware, no hace
@@ -189,8 +201,15 @@ def login():
             conn.commit()
             usuario = conn.execute("SELECT * FROM usuarios WHERE id=%s", (usuario["id"],)).fetchone()
 
-        credenciales_validas = (
-            usuario and usuario["activo"] and check_password_hash(usuario["password_hash"], password)
+        # Solo se le pregunta a Supabase si el perfil existe y está activo:
+        # dar de baja a alguien tiene que cerrarle la puerta aunque su cuenta
+        # siga existiendo del otro lado.
+        id_verificado = None
+        if usuario and usuario["activo"] and usuario["email"]:
+            id_verificado = supabase_auth.verificar_credenciales(usuario["email"], password)
+
+        credenciales_validas = bool(
+            id_verificado and str(id_verificado) == str(usuario["id"])
         )
 
         if not credenciales_validas:
@@ -218,7 +237,8 @@ def login():
 
         session.clear()
         session.permanent = True
-        session["usuario_id"] = usuario["id"]
+        # str(): el id es un UUID, y la cookie de sesión se serializa a JSON.
+        session["usuario_id"] = str(usuario["id"])
         session["usuario_nombre"] = usuario["nombre"]
         session["usuario_rol"] = usuario["rol"]
         session["debe_cambiar_password"] = bool(usuario["debe_cambiar_password"])

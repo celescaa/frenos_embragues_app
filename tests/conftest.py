@@ -92,9 +92,20 @@ def pg_url():
 # acceso a nada real y no son un secreto. Quedan overrideables por si alguien
 # corre la suite contra otra instancia.
 SUPABASE_URL_TEST = os.environ.get("SUPABASE_URL_TEST", "http://127.0.0.1:54321")
+SUPABASE_ANON_KEY_TEST = os.environ.get(
+    "SUPABASE_ANON_KEY_TEST", "sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH"
+)
 SUPABASE_SERVICE_KEY_TEST = os.environ.get(
     "SUPABASE_SERVICE_ROLE_KEY_TEST", "sb_secret_N7UND0UgjKTVK-Uodkm0Hg_xSvEMPvz"
 )
+
+# El código de la app lee estas tres del entorno. Se apuntan al Supabase local
+# para toda la suite, sin pisar lo que ya hubiera definido (por ejemplo un
+# .env con credenciales del proyecto en la nube, contra el que NO queremos
+# correr tests).
+os.environ.setdefault("SUPABASE_URL", SUPABASE_URL_TEST)
+os.environ.setdefault("SUPABASE_ANON_KEY", SUPABASE_ANON_KEY_TEST)
+os.environ.setdefault("SUPABASE_SERVICE_ROLE_KEY", SUPABASE_SERVICE_KEY_TEST)
 
 
 @pytest.fixture
