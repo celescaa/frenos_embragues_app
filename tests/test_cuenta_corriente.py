@@ -27,6 +27,7 @@ from decimal import Decimal
 import psycopg
 import pytest
 
+from core import database as db
 from core import facturacion_afip
 from core.app import app as flask_app
 
@@ -82,10 +83,14 @@ def test_el_descuento_porcentual_se_calcula_exacto(db_conn):
            VALUES ('Caro', 'Frenos', 500, 999.99) RETURNING id"""
     ).fetchone()["id"]
     db_conn.execute(
+        # db.hoy() y no CURRENT_DATE: CURRENT_DATE es la fecha de la base, que
+        # está en UTC, y desde las 21:00 hora argentina ya es el día siguiente
+        # -- la promoción quedaría empezando mañana y no se aplicaría. La app
+        # guarda db.hoy() (ver promocion_nueva), así que el test hace lo mismo.
         """INSERT INTO promociones_aplicadas
            (cliente_id, tipo, porcentaje_o_monto, alcance, fecha_inicio, aprobado_por)
-           VALUES (%s, 'porcentaje', 10, 'todo', CURRENT_DATE, 'test')""",
-        (cliente,),
+           VALUES (%s, 'porcentaje', 10, 'todo', %s, 'test')""",
+        (cliente, db.hoy()),
     )
 
     # items = lista de tuplas (producto_id, cantidad, precio_unitario, subtotal)

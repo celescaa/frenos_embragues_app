@@ -15,6 +15,7 @@ from flask import Flask, render_template, request, redirect, url_for, flash, jso
 from flask_wtf import CSRFProtect
 from flask_wtf.csrf import CSRFError
 from datetime import datetime, timedelta, timezone
+from werkzeug.middleware.proxy_fix import ProxyFix
 from werkzeug.security import generate_password_hash, check_password_hash
 from werkzeug.utils import secure_filename
 from dotenv import load_dotenv
@@ -39,17 +40,25 @@ app = Flask(
     static_folder=os.path.join(PROJECT_ROOT, "static"),
 )
 
-# La clave de sesión se genera una sola vez y se guarda en un archivo local
-# (nunca hardcodeada en el código ni en el repositorio), en la raíz del
-# proyecto.
-_SECRET_KEY_PATH = os.path.join(PROJECT_ROOT, ".secret_key")
-if os.path.exists(_SECRET_KEY_PATH):
-    with open(_SECRET_KEY_PATH) as _f:
-        app.secret_key = _f.read().strip()
+# La clave de sesión sale de la variable de entorno SECRET_KEY. En Vercel eso
+# no es opcional: no hay disco persistente, así que un archivo se regeneraría
+# en cada arranque en frío y tiraría abajo todas las sesiones abiertas.
+#
+# Corriendo local se conserva el archivo de siempre (nunca hardcodeada en el
+# código ni en el repositorio), para no tener que definir la variable a mano
+# en cada `python app.py`.
+_SECRET_KEY_ENV = os.environ.get("SECRET_KEY")
+if _SECRET_KEY_ENV:
+    app.secret_key = _SECRET_KEY_ENV
 else:
-    app.secret_key = secrets.token_hex(32)
-    with open(_SECRET_KEY_PATH, "w") as _f:
-        _f.write(app.secret_key)
+    _SECRET_KEY_PATH = os.path.join(PROJECT_ROOT, ".secret_key")
+    if os.path.exists(_SECRET_KEY_PATH):
+        with open(_SECRET_KEY_PATH) as _f:
+            app.secret_key = _f.read().strip()
+    else:
+        app.secret_key = secrets.token_hex(32)
+        with open(_SECRET_KEY_PATH, "w") as _f:
+            _f.write(app.secret_key)
 
 csrf = CSRFProtect(app)
 # El default de Flask-WTF (WTF_CSRF_TIME_LIMIT = 3600s = 1 hora) es mucho más
@@ -65,8 +74,18 @@ app.config["WTF_CSRF_TIME_LIMIT"] = None
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(hours=12)
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
-# Cuando el sistema quede accesible por HTTPS (hosting), sumar:
-# app.config["SESSION_COOKIE_SECURE"] = True
+# HTTPS lo provee Vercel. Se activa por variable de entorno en vez de estar
+# fijo, porque corriendo local (http://127.0.0.1:5050) una cookie "secure" no
+# viajaría nunca y no se podría iniciar sesión.
+app.config["SESSION_COOKIE_SECURE"] = os.environ.get("SESSION_COOKIE_SECURE") == "1"
+
+# Vercel pone la aplicación detrás de un proxy que termina el HTTPS y reenvía
+# por HTTP. Sin esto, `request.host` sale del header Host crudo — que el
+# cliente puede falsificar, y que `manejar_csrf_error` (justo acá abajo) usa
+# para su chequeo de mismo origen — y `url_for(_external=True)` arma URLs
+# http:// en un sitio https://. Un solo proxy de confianza: el de Vercel.
+app.wsgi_app = ProxyFix(app.wsgi_app, x_for=1, x_proto=1, x_host=1)
+
 
 @app.errorhandler(CSRFError)
 def manejar_csrf_error(e):
@@ -85,19 +104,25 @@ LOCKOUT_INTENTOS = 5
 LOCKOUT_MINUTOS = 15
 
 
-# El esquema (tablas, columnas) ya no lo crea/migra este módulo: vive en
-# supabase/migrations/ (Tarea 2 y 4 de la migración a Postgres). El primer
-# usuario admin ya no se autogenera acá tampoco (en serverless, ejecutar eso
-# en cada arranque en frío no tiene sentido) — se crea a mano; en el Plan 2
-# pasa a Supabase Auth. seed_demo_data() sigue corriendo (es idempotente:
-# no hace nada si ya hay productos cargados), pero ahora necesita una
-# conexión propia porque dejó de abrir la suya.
-_conn_seed = db.get_connection()
-try:
-    db.seed_demo_data(_conn_seed)
-    _conn_seed.commit()
-finally:
-    _conn_seed.close()
+# El esquema (tablas, columnas) no lo crea ni lo migra este módulo: vive en
+# supabase/migrations/. El primer usuario admin tampoco se autogenera acá: se
+# crea desde el panel de Supabase (ver README).
+#
+# Los datos de ejemplo se siembran únicamente al correr la app a mano, desde
+# el bloque __main__ del `app.py` de la raíz. NO pueden sembrarse a nivel de
+# módulo: ahí se ejecutarían en cada arranque en frío de una función
+# serverless, y como la condición de siembra es "la base está vacía" —que es
+# justo el estado de una base de producción recién creada— el primer visitante
+# del sistema real le sembraría productos y ventas de mentira al negocio.
+def sembrar_datos_de_ejemplo():
+    """Carga los datos de ejemplo si la base está vacía. Solo la llama el
+    arranque manual (`python app.py`), nunca el import del módulo."""
+    conn = db.get_connection()
+    try:
+        db.seed_demo_data(conn)
+        conn.commit()
+    finally:
+        conn.close()
 
 
 # ---------------------------------------------------------------------------
@@ -393,8 +418,8 @@ def dashboard():
 
     total_ventas_hist = conn.execute("SELECT COALESCE(SUM(total),0) AS t FROM ventas").fetchone()["t"]
 
-    hoy = datetime.now()
-    primer_dia_mes = hoy.replace(day=1).strftime("%Y-%m-%d")
+    hoy = db.hoy()
+    primer_dia_mes = hoy.replace(day=1)
     ventas_mes = conn.execute(
         "SELECT COALESCE(SUM(total),0) AS t FROM ventas WHERE fecha >= %s", (primer_dia_mes,)
     ).fetchone()["t"]
@@ -509,7 +534,7 @@ def clientes_nuevo():
                 request.form.get("cuit_dni", ""),
                 request.form.get("tipo_cliente", "particular"),
                 request.form.get("condicion_iva", "consumidor_final"),
-                datetime.now().strftime("%Y-%m-%d"),
+                db.hoy(),
             ),
         )
         conn.commit()
@@ -765,7 +790,7 @@ def clientes_top():
     parametros = []
     condicion_fecha = ""
     if periodo != "todo":
-        desde = (datetime.now() - timedelta(days=int(periodo))).strftime("%Y-%m-%d")
+        desde = db.hoy() - timedelta(days=int(periodo))
         condicion_fecha = "WHERE v.fecha >= %s"
         parametros = [desde]
 
@@ -823,7 +848,7 @@ def promocion_nueva(cliente_id):
     alcance = request.form.get("alcance", "todo")
     if alcance not in ("todo", "productos_puntuales"):
         alcance = "todo"
-    fecha_inicio = request.form.get("fecha_inicio") or datetime.now().strftime("%Y-%m-%d")
+    fecha_inicio = request.form.get("fecha_inicio") or db.hoy()
     fecha_fin = request.form.get("fecha_fin") or None
     aprobado_por = session.get("usuario_nombre")
 
@@ -858,7 +883,7 @@ def promocion_finalizar(promocion_id):
     conn = db.get_connection()
     conn.execute(
         "UPDATE promociones_aplicadas SET fecha_fin=%s WHERE id=%s",
-        (datetime.now().strftime("%Y-%m-%d"), promocion_id),
+        (db.hoy(), promocion_id),
     )
     conn.commit()
     conn.close()
@@ -1328,7 +1353,7 @@ def ventas_dia():
     sin tocar el modelo de datos de ventas ni el flujo de carga — es
     puramente una pantalla de lectura sobre lo que ya se registró."""
     conn = db.get_connection()
-    fecha = request.args.get("fecha", "").strip() or datetime.now().strftime("%Y-%m-%d")
+    fecha = request.args.get("fecha", "").strip() or db.hoy()
     medio_pago = request.args.get("medio_pago", "").strip()
 
     condiciones = ["fecha = %s"]
@@ -1373,7 +1398,7 @@ def ventas_dia():
 
 
 def _promociones_vigentes_cliente(conn, cliente_id):
-    hoy = datetime.now().strftime("%Y-%m-%d")
+    hoy = db.hoy()
     return conn.execute(
         """SELECT * FROM promociones_aplicadas
            WHERE cliente_id=%s AND fecha_inicio<=%s AND (fecha_fin IS NULL OR fecha_fin>=%s)""",
@@ -1467,7 +1492,7 @@ def registrar_venta(conn, cliente_id, metodo_pago, items, tipo_comprobante_solic
     cur.execute(
         """INSERT INTO ventas (fecha, cliente_id, total, metodo_pago, tipo_comprobante, numero_comprobante, id_operacion)
            VALUES (%s, %s, %s, %s, %s, %s, %s) RETURNING id""",
-        (datetime.now().strftime("%Y-%m-%d"), cliente_id, total, metodo_pago, tipo_comprobante, numero_comprobante, id_operacion),
+        (db.hoy(), cliente_id, total, metodo_pago, tipo_comprobante, numero_comprobante, id_operacion),
     )
     venta_id = cur.fetchone()["id"]
     for producto_id, cant, precio_unitario, subtotal in items:
@@ -1549,7 +1574,7 @@ def api_clientes_nuevo():
             request.form.get("email", "").strip(),
             request.form.get("direccion", "").strip(),
             request.form.get("cuit_dni", "").strip(),
-            datetime.now().strftime("%Y-%m-%d"),
+            db.hoy(),
         ),
     )
     cliente_id = cur.fetchone()["id"]
@@ -1766,7 +1791,7 @@ def compras_nueva():
         cur = conn.cursor()
         cur.execute(
             "INSERT INTO compras (fecha, proveedor_id, total, numero_factura_proveedor) VALUES (%s, %s, %s, %s) RETURNING id",
-            (datetime.now().strftime("%Y-%m-%d"), proveedor_id, total, numero_factura),
+            (db.hoy(), proveedor_id, total, numero_factura),
         )
         compra_id = cur.fetchone()["id"]
         for producto_id, cant, precio_unitario, subtotal in items:
@@ -1962,7 +1987,7 @@ def pedidos_marcar():
         flash("No había productos para marcar.", "warning")
         return redirect(url_for("pedidos_lista"))
     conn = db.get_connection()
-    hoy = datetime.now().strftime("%Y-%m-%d")
+    hoy = db.hoy()
     cur = conn.cursor()
     cur.executemany(
         "UPDATE productos SET pedido_pendiente=true, fecha_pedido_pendiente=%s WHERE id=%s",
@@ -2384,7 +2409,7 @@ def tienda_checkout():
         cur.execute(
             """INSERT INTO pedidos_web (fecha, nombre_cliente, telefono, email, direccion, cuit_dni, total, estado)
                VALUES (%s, %s, %s, %s, %s, %s, %s, 'pendiente_pago') RETURNING id""",
-            (datetime.now().strftime("%Y-%m-%d"), nombre, telefono, email, direccion, cuit_dni, total),
+            (db.hoy(), nombre, telefono, email, direccion, cuit_dni, total),
         )
         pedido_id = cur.fetchone()["id"]
         for it in items:
@@ -2507,7 +2532,7 @@ def webhook_mercadopago():
             (
                 pedido["nombre_cliente"], pedido["telefono"], pedido["email"], pedido["direccion"],
                 pedido["cuit_dni"] or "",
-                datetime.now().strftime("%Y-%m-%d"),
+                db.hoy(),
             ),
         )
         cliente_id = cur.fetchone()["id"]
@@ -2532,4 +2557,5 @@ def webhook_mercadopago():
 if __name__ == "__main__":
     # Uso normal: correr `python app.py` desde la raíz (ver el shim ahí).
     # Esto solo se ejecuta si alguien corre core/app.py directamente.
+    sembrar_datos_de_ejemplo()
     app.run(debug=True, port=5050)

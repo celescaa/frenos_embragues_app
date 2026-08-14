@@ -14,6 +14,7 @@ import secrets
 import string
 from datetime import datetime, timedelta
 from decimal import Decimal
+from zoneinfo import ZoneInfo
 
 import psycopg
 from psycopg.rows import dict_row
@@ -24,6 +25,30 @@ DATABASE_URL = os.environ.get(
     "DATABASE_URL",
     "postgresql://postgres:postgres@127.0.0.1:54322/postgres",
 )
+
+# El negocio está en Ituzaingó, provincia de Buenos Aires. "Hoy" es el día
+# ACÁ, no donde corra el servidor.
+TZ_NEGOCIO = ZoneInfo("America/Argentina/Buenos_Aires")
+
+# Lo mismo, para usar del lado de Postgres. Sirve para comparar contra
+# columnas DATE dentro de una consulta sin tener que pasar la fecha como
+# parámetro: así el criterio de "hoy" es uno solo, escrito en un solo lugar.
+HOY_SQL = "(now() AT TIME ZONE 'America/Argentina/Buenos_Aires')::date"
+
+
+def hoy():
+    """La fecha de hoy para el negocio, en Argentina.
+
+    Existe porque `datetime.now()` devuelve la hora local del servidor, y eso
+    dejó de ser Argentina al desplegar en Vercel, que corre en UTC — tres
+    horas adelante. Con `datetime.now()`, a partir de las 21:00 hora argentina
+    el sistema empieza a fechar todo con el día siguiente: una venta cargada a
+    las 21:30 no aparece en las ventas del día, una promoción creada a esa
+    hora no se aplica hasta mañana, y el total del mes cambia de mes tres
+    horas antes. Ninguno de esos casos tira un error; simplemente dan números
+    equivocados.
+    """
+    return datetime.now(TZ_NEGOCIO).date()
 
 
 def get_connection():

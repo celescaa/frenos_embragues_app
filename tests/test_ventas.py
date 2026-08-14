@@ -1,4 +1,5 @@
 from decimal import Decimal
+from core import database as db
 from core.app import aplicar_promociones, registrar_venta
 
 
@@ -68,10 +69,13 @@ def test_aplicar_promociones_porcentual_usa_decimal_exacto(db_conn):
     Python antes de escribir este test."""
     cliente = _cliente(db_conn, "Mecánico con descuento")
     db_conn.execute(
+        # db.hoy() y no CURRENT_DATE: CURRENT_DATE es la fecha de la base (UTC),
+        # que desde las 21:00 hora argentina ya es el día siguiente -- la
+        # promoción quedaría empezando mañana. La app guarda db.hoy().
         """INSERT INTO promociones_aplicadas
            (cliente_id, porcentaje_o_monto, tipo, alcance, fecha_inicio, fecha_fin, aprobado_por)
-           VALUES (%s, %s, 'porcentaje', 'todo', CURRENT_DATE, NULL, 'test')""",
-        (cliente, Decimal("2.00")),
+           VALUES (%s, %s, 'porcentaje', 'todo', %s, NULL, 'test')""",
+        (cliente, Decimal("2.00"), db.hoy()),
     )
     prod = _producto(db_conn, "Producto con promo", Decimal("2.75"), 10)
 
