@@ -333,6 +333,42 @@ Buje parrilla delantera — FIAT Palio / Siena
 - **Se carga desde la ficha del producto**: "este repuesto también lo tengo
   en otras marcas" → elegir un grupo existente o crear uno. El nombre viene
   precargado con el nombre del producto y se puede editar.
+- **Un script propone los grupos, una persona los confirma.**
+  `scripts/proponer_equivalencias.py` cruza los productos por mismo rubro +
+  mismo auto vinculado + descripción parecida, y escribe una planilla con los
+  candidatos para tildar cuáles son de verdad. No aplica nada sin
+  `--aplicar`, igual que `matchear_productos_proveedores.py`. El trabajo
+  manual pasa a ser tildar una lista, no buscar las equivalencias de cero.
+
+### Por qué las equivalencias no se pueden resolver solas
+
+Es la diferencia con `producto_proveedor` (el mismo artículo cotizado por dos
+proveedores), que **sí** se llena automáticamente con
+`matchear_productos_proveedores.py`. Ahí el match es confiable porque es
+literalmente el mismo artículo del mismo fabricante, y el código de barras
+—que asigna la marca que fabrica, no quien revende— es un identificador
+compartido entre las dos listas.
+
+Entre marcas distintas no hay ningún dato compartido: códigos de barras
+distintos, códigos de producto distintos. Lo único parecido es la
+descripción, y ahí el problema es que se parecen **demasiado**:
+
+```
+BUJE PARRILLA DELANTERA FIAT PALIO     <- Cobreq
+BUJE PARRILLA TRASERA   FIAT PALIO     <- VTH
+```
+
+Una palabra de diferencia, y agruparlas manda al cliente a casa con la pieza
+equivocada. Lo mismo con izquierdo/derecho, con sensor/sin sensor, o con dos
+medidas distintas. Por eso el script propone y no aplica.
+
+**Fuente mejor, pendiente de confirmar**: la propia pantalla de Lupa muestra
+las tres marcas de un mismo buje, o sea que ese distribuidor ya tiene la
+equivalencia cargada. Si alguna de las listas de precios de los proveedores
+trae una columna de "equivalencias" o "reemplaza a", eso es dato confirmado y
+le gana a cualquier detección por parecido de texto. Celes va a revisar las
+listas que tiene; si aparece esa columna, el plan de implementación debe
+priorizar leerla por sobre el script de propuestas.
 - **En Nueva venta se agrega el producto concreto que se tocó, nunca el
   grupo.** El stock es por producto y no puede ser de otra manera.
 - **Un producto pertenece a lo sumo a un grupo** (una sola columna, no una
@@ -390,6 +426,22 @@ HTML5 de `producto_form.html` y `compra_revisar_factura.html`.
   `vehiculos` esté poco cargada, ese filtro va a devolver poco. Por eso
   `modelo_compatible` sigue vivo y la búsqueda de texto lo sigue mirando: el
   sistema no empeora respecto de hoy en ningún momento de la transición.
+- **El código de barras puede no ser un identificador global.** Todo el
+  argumento de arriba (por qué `producto_proveedor` sí se puede llenar
+  automáticamente y las equivalencias no) se apoya en que el EAN lo asigna el
+  fabricante y es el mismo en todas las listas. En autopartes eso se rompe
+  seguido: muchos repuestos nacionales no tienen EAN, y algunos distribuidores
+  le pegan su propia etiqueta con su propio código. Si pasa,
+  `productos.codigo_barras` deja de ser global y
+  `matchear_productos_proveedores.py` —que hoy confía en él como match
+  exacto— estaría cruzando sobre una premisa falsa. **Ese script todavía no
+  se probó nunca contra listas de precios reales**, así que no está ni
+  confirmado ni descartado. Se chequea sin programar nada: comparar el código
+  de barras impreso en la caja de un mismo repuesto comprado a dos
+  proveedores distintos. Si difieren, el criterio del matcher tiene que pasar
+  a ser código de barras **por proveedor**, no global. No bloquea este
+  trabajo — la fase 6 no usa códigos de barras — pero afecta a un script que
+  ya está en el repositorio.
 - **`unaccent` no es inmutable en Postgres**, así que no se puede indexar
   directamente en un índice de expresión sin envolverla. Es un detalle que el
   plan de implementación tiene que resolver explícitamente (envolverla en una
