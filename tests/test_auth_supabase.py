@@ -117,3 +117,65 @@ def test_quien_debe_cambiar_la_contrasena_va_a_esa_pantalla(cliente, crear_usuar
     assert "/cambiar-password" in respuesta.headers["Location"]
     with cliente.session_transaction() as sesion:
         assert sesion["debe_cambiar_password"] is True
+
+
+def test_cambiar_la_contrasena_permite_entrar_con_la_nueva(cliente, crear_usuario):
+    usuario = crear_usuario("matias", password="clave-vieja-123")
+    cliente.post("/login", data={"username": "matias", "password": "clave-vieja-123"})
+    cliente.post("/cambiar-password", data={
+        "actual": "clave-vieja-123", "nueva": "clave-nueva-456", "confirmar": "clave-nueva-456",
+    })
+    cliente.get("/logout")
+
+    cliente.post("/login", data={"username": "matias", "password": "clave-nueva-456"})
+    with cliente.session_transaction() as sesion:
+        assert sesion.get("usuario_id") == usuario["id"]
+
+
+def test_no_se_puede_cambiar_sin_saber_la_contrasena_actual(cliente, crear_usuario):
+    """Si no se validara, alguien que encuentra una sesión abierta se queda
+    con la cuenta cambiándole la contraseña al dueño."""
+    crear_usuario("matias", password="clave-vieja-123")
+    cliente.post("/login", data={"username": "matias", "password": "clave-vieja-123"})
+    respuesta = cliente.post("/cambiar-password", data={
+        "actual": "no-es-la-actual", "nueva": "clave-nueva-456", "confirmar": "clave-nueva-456",
+    })
+    assert "actual no es correcta".encode() in respuesta.data
+
+    cliente.get("/logout")
+    cliente.post("/login", data={"username": "matias", "password": "clave-nueva-456"})
+    with cliente.session_transaction() as sesion:
+        assert "usuario_id" not in sesion, "la contraseña se cambió sin validar la actual"
+
+
+def test_el_cambio_obligatorio_no_pide_la_contrasena_actual(cliente, crear_usuario):
+    """Tras un reseteo el usuario entra con una temporal y tiene que cambiarla;
+    pedirle la 'actual' ahí sería redundante (acaba de escribirla al entrar)."""
+    crear_usuario("nuevo", password="temporal-123", debe_cambiar_password=True)
+    cliente.post("/login", data={"username": "nuevo", "password": "temporal-123"})
+    cliente.post("/cambiar-password", data={
+        "actual": "", "nueva": "elegida-por-mi-456", "confirmar": "elegida-por-mi-456",
+    })
+    cliente.get("/logout")
+
+    cliente.post("/login", data={"username": "nuevo", "password": "elegida-por-mi-456"})
+    with cliente.session_transaction() as sesion:
+        assert "usuario_id" in sesion
+        assert sesion["debe_cambiar_password"] is False
+
+
+def test_una_contrasena_corta_no_se_guarda_en_supabase(cliente, crear_usuario):
+    """El orden importa: si se mandara a Supabase antes de validar el largo,
+    quedaría guardada allá y rechazada acá -- el usuario terminaría con una
+    contraseña que el sistema le dijo que no aceptaba."""
+    crear_usuario("matias", password="clave-vieja-123")
+    cliente.post("/login", data={"username": "matias", "password": "clave-vieja-123"})
+    respuesta = cliente.post("/cambiar-password", data={
+        "actual": "clave-vieja-123", "nueva": "corta", "confirmar": "corta",
+    })
+    assert "al menos 8".encode() in respuesta.data
+
+    cliente.get("/logout")
+    cliente.post("/login", data={"username": "matias", "password": "corta"})
+    with cliente.session_transaction() as sesion:
+        assert "usuario_id" not in sesion

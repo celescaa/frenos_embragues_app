@@ -67,3 +67,25 @@ def verificar_credenciales(email, password):
     except Exception:
         return None  # red, configuración, servicio caído
     return respuesta.user.id if respuesta and respuesta.user else None
+
+
+def cambiar_password(usuario_id, nueva):
+    """Cambia la contraseña de una cuenta. Devuelve True si salió bien.
+
+    Usa la admin API y no `update_user`, porque este sistema no guarda la
+    sesión de Supabase del usuario: solo le pregunta por sus credenciales en
+    el momento del login, y sin sesión activa no hay contra quién aplicar
+    `update_user`.
+
+    Ojo con el orden en quien llama: esto tiene que ir DESPUÉS de validar el
+    largo y la coincidencia. Si se llamara antes, una contraseña rechazada por
+    el sistema ya habría quedado guardada del lado de Supabase, y el usuario
+    terminaría con una contraseña que la pantalla le dijo que no aceptaba.
+    """
+    if not _clave_de_servicio() or not _url():
+        return False
+    try:
+        cliente_admin().auth.admin.update_user_by_id(str(usuario_id), {"password": nueva})
+    except Exception:
+        return False
+    return True

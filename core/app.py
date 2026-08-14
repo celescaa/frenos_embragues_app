@@ -270,16 +270,28 @@ def cambiar_password():
         conn = db.get_connection()
         usuario = conn.execute("SELECT * FROM usuarios WHERE id=%s", (session["usuario_id"],)).fetchone()
 
-        if not obligatorio and not check_password_hash(usuario["password_hash"], actual):
+        # La contraseña actual se verifica pidiéndole a Supabase que inicie
+        # sesión con ella: si entra, era la correcta. No se pide cuando el
+        # cambio es obligatorio (el usuario acaba de escribirla para entrar).
+        actual_valida = obligatorio or bool(
+            supabase_auth.verificar_credenciales(usuario["email"], actual)
+        )
+
+        # El orden de las ramas importa: el cambio contra Supabase va ÚLTIMO,
+        # después de validar largo y coincidencia. Al revés, una contraseña
+        # que el sistema rechaza ya habría quedado guardada del otro lado.
+        if not actual_valida:
             flash("La contraseña actual no es correcta.", "danger")
         elif len(nueva) < 8:
             flash("La contraseña nueva tiene que tener al menos 8 caracteres.", "danger")
         elif nueva != confirmar:
             flash("Las contraseñas nuevas no coinciden.", "danger")
+        elif not supabase_auth.cambiar_password(usuario["id"], nueva):
+            flash("No se pudo cambiar la contraseña. Probá de nuevo en un momento.", "danger")
         else:
             conn.execute(
-                "UPDATE usuarios SET password_hash=%s, debe_cambiar_password=false WHERE id=%s",
-                (generate_password_hash(nueva), usuario["id"]),
+                "UPDATE usuarios SET debe_cambiar_password=false WHERE id=%s",
+                (usuario["id"],),
             )
             conn.commit()
             conn.close()
