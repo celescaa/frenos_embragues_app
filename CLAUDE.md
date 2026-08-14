@@ -889,7 +889,8 @@ corre en la compu del local — y el login **sigue siendo el propio**, con la
 tabla `usuarios` y `password_hash` (no se tocó nada de autenticación en
 esta migración).
 
-El Plan 2 (a escribir en `docs/superpowers/plans/` después de este) cubre
+El Plan 2 (`docs/superpowers/plans/2026-08-13-deploy-vercel-supabase.md`,
+**ya ejecutado** — ver la sección "Deploy en Vercel" más abajo) cubre
 lo que falta para desplegarlo de verdad en Vercel: migrar el login a
 Supabase Auth, mover las fotos de producto (`static/img/productos/`) a
 Supabase Storage (Vercel tampoco tiene disco persistente para eso),
@@ -930,6 +931,133 @@ en `vercel.json`, o desde Settings → Functions), y la propia documentación
 de Vercel recomienda ponerla donde está la base. Verificado el 13/08/2026 en
 `vercel.com/docs/regions` y `.../functions/configuring-functions/region`.
 
+## Deploy en Vercel + Supabase Auth y Storage (Plan 2, 14/08/2026)
+
+Ejecución del plan `docs/superpowers/plans/2026-08-13-deploy-vercel-supabase.md`.
+Deja el sistema listo para correr en Vercel. Qué cambió respecto de la versión
+que corría solo en la compu del local:
+
+### Autenticación: Supabase Auth
+
+- **Supabase Auth guarda únicamente email y contraseña.** Todo lo demás sigue
+  en la tabla `usuarios`: `username`, `nombre`, `rol`, `activo`,
+  `debe_cambiar_password`, `intentos_fallidos`, `bloqueado_hasta`.
+- `usuarios.password_hash` **ya no existe** (migración
+  `20260814014500_borrar_password_hash.sql`). `usuarios.id` es clave foránea
+  de `auth.users(id)` con `ON DELETE CASCADE`, y `usuarios.email` es UNIQUE.
+- **Flask sigue manejando la sesión** con su cookie firmada, así que la
+  protección CSRF quedó intacta y `verificar_sesion()` no cambió. El alcance
+  real fueron 4 pantallas: `/login`, `/logout`, `/cambiar-password`,
+  `/usuarios`. Los 30+ templates no se tocaron.
+- **Se entra con el nombre de usuario O con el email.** Si el texto tiene `@`
+  se busca por email; si no, por username, y se traduce a su email antes de
+  preguntarle a Supabase (que solo entiende de emails).
+- **Se conservan las tres cosas que Supabase no trae**: bloqueo por 5 intentos
+  fallidos / 15 minutos, cambio de contraseña obligatorio, y los roles.
+- `core/supabase_auth.py` es el único punto de contacto con el servicio, con
+  el mismo criterio defensivo que `facturacion_afip.py` y `tienda_pagos.py`:
+  no deja escapar excepciones.
+
+**Ordenes que importan y tienen test propio** (invertirlos deja el sistema en
+un estado incoherente, sin error visible):
+
+- **Alta de usuario**: primero la cuenta en Supabase, después el perfil. Al
+  revés, si falla la cuenta queda alguien con rol y permisos pero sin forma de
+  autenticarse, y nadie se entera hasta que esa persona intenta entrar.
+- **Baja de usuario**: se borra la cuenta y el perfil se va solo por el
+  CASCADE. Borrar las dos cosas por separado abre la puerta a que el DELETE
+  local salga bien y el borrado de la cuenta falle: quedaría alguien que
+  todavía puede autenticarse pero ya no tiene perfil ni rol.
+- **Cambio de contraseña**: la llamada a Supabase va DESPUÉS de validar largo
+  y coincidencia. Al revés, una contraseña de 3 letras queda guardada del lado
+  de Supabase y rechazada de este lado — el usuario termina con una contraseña
+  que la pantalla le dijo que no aceptaba.
+- **Reseteo**: se cambia en Supabase primero y recién después se marca el
+  cambio obligatorio. Al revés, si falla, la persona queda con la contraseña
+  vieja pero obligada a cambiarla con una temporal que nunca existió.
+
+**Primer admin**: se crea desde el panel de Supabase (Authentication → Users →
+Add user, con "Auto Confirm User" activado) y después se inserta su fila en
+`usuarios` con el mismo id, una sola vez, desde el SQL Editor. Reemplaza al
+viejo `credenciales_iniciales.txt`.
+
+### Fotos de producto: Supabase Storage
+
+`core/almacenamiento.py`, bucket público `productos`.
+`guardar_imagen_producto()` y `eliminar_imagen_producto()` **conservaron su
+firma**, así que las pantallas que las llaman no cambiaron.
+`productos.imagen` sigue guardando solo el nombre del archivo; lo que cambió
+es de dónde lo sirve el navegador, vía el filtro de Jinja `url_imagen`.
+
+`upsert` no es opcional: el nombre del archivo se deriva del id del producto,
+así que reemplazar la foto de un producto sube el mismo nombre. Sin upsert,
+Storage lo rechaza por duplicado y la foto nueva se pierde en silencio.
+
+### La fecha del negocio no depende del reloj del servidor
+
+**Bug encontrado durante esta migración, que Vercel iba a activar sí o sí.**
+El sistema fechaba todo con `datetime.now()`, o sea la hora local de la
+máquina. Corriendo en la compu del local eso era hora argentina; **en Vercel
+el reloj es UTC**, tres horas adelante. A partir de las 21:00 hora argentina
+el sistema empezaba a fechar con el día siguiente:
+
+- una venta cargada a las 21:30 no aparecía en "Ventas del día" de esa jornada;
+- una promoción creada a esa hora no se aplicaba a las ventas de esa noche;
+- el total del mes cambiaba de mes tres horas antes de tiempo.
+
+Nada de eso tira un error: da números equivocados, justo en el horario en que
+el local todavía está abierto. Se agregó `db.hoy()` (fecha en
+`America/Argentina/Buenos_Aires`) y se usa en los 13 sitios que fechaban con
+el reloj del servidor. **Nunca usar `datetime.now()` para una fecha de
+negocio** — `db.hoy()`. Para comparar dentro de una consulta está
+`db.HOY_SQL`. `datetime.now(timezone.utc)` sí es correcto para
+`bloqueado_hasta`, que es un instante y no una fecha de negocio.
+
+El bug se delató solo: dos tests de promociones empezaron a fallar al pasar de
+las 21:00 del día en que se hizo la migración.
+
+### Otros cambios de esta tanda
+
+- **La siembra de datos de ejemplo salió del import del módulo.** Corría en
+  cada arranque en frío de la función serverless, y su condición de disparo es
+  "la base está vacía" — exactamente el estado de una base de producción
+  recién creada. El primer visitante del sistema real le habría sembrado a la
+  base del negocio 5 clientes, 14 productos y 45 ventas de mentira. Ahora vive
+  en el bloque `__main__` del `app.py` de la raíz, que solo corre con
+  `python app.py`.
+- **`SECRET_KEY` sale del entorno.** En Vercel no hay disco: el archivo
+  `.secret_key` se regeneraría en cada arranque en frío y cerraría todas las
+  sesiones. Local sigue usando el archivo.
+- **`ProxyFix`** (`core/app.py`): Vercel termina el HTTPS en su proxy y
+  reenvía por HTTP. Sin esto, `request.host` sale del header `Host` crudo
+  —que el cliente puede falsificar, y que usa el chequeo de mismo origen de
+  `manejar_csrf_error`— y `url_for(_external=True)` arma URLs `http://` en un
+  sitio `https://`.
+- **`SESSION_COOKIE_SECURE`** por variable de entorno, no fija: local es HTTP
+  y una cookie "secure" no viajaría nunca.
+- **`vercel.json`**: región `gru1` (São Paulo, donde está la base),
+  `maxDuration` 300s, y exclusión del bundle de lo que no se usa en runtime.
+- **`pytest.ini`**: la salida de los tests queda limpia. Silencia tres
+  advertencias del paquete `supabase` (solo esos mensajes, solo desde esos
+  módulos) y convierte en error cualquier `DeprecationWarning` que venga de
+  `core/`. Una advertencia que aparece siempre deja de leerse.
+- **`tests/conftest.py`** verifica en `pytest_configure` que la base del
+  puerto sea la de este proyecto antes de tocar nada. El 54322 es el puerto
+  default de la CLI de Supabase para cualquier proyecto: con otro proyecto
+  local levantado (pasó con `hogar-gestion`), la suite apuntaba sin avisar a
+  la base ajena — y el fixture de limpieza hace TRUNCATE.
+
+### Correr los tests ahora
+
+Ya no alcanza con Postgres: los tests de autenticación y de fotos usan también
+los servicios Auth y Storage, todos incluidos en `npx supabase start`. Corren
+contra el Supabase local de verdad, **no contra mocks** — lo que esta
+migración cambió es justamente el diálogo con ese servicio.
+
+El bucket `productos` lo crea la propia suite si falta
+(`almacenamiento.asegurar_bucket()`); en producción se crea una vez desde el
+panel.
+
 ## Estructura
 
 ```
@@ -940,6 +1068,8 @@ frenos_embragues_app/
 ├── core/                      # el núcleo del sistema en sí
 │   ├── app.py                   # rutas y lógica (Flask) — el archivo grande
 │   ├── database.py              # esquema + migraciones + datos de ejemplo
+│   ├── supabase_auth.py         # login/usuarios contra Supabase Auth
+│   ├── almacenamiento.py        # fotos de producto en Supabase Storage
 │   ├── facturacion_afip.py      # integración Afip SDK (Factura A/B)
 │   ├── tienda_pagos.py          # integración Mercado Pago (tienda online)
 │   ├── comprobante_pdf.py       # genera el PDF del comprobante (xhtml2pdf)
@@ -979,6 +1109,8 @@ frenos_embragues_app/
 │
 ├── templates/                 # pantallas (Bootstrap 5, Chart.js en el dashboard)
 ├── static/                    # CSS/imágenes, incluye fotos de producto subidas
+├── vercel.json                # config del deploy en Vercel (región gru1)
+├── pytest.ini                 # config de la suite (salida sin ruido)
 ├── Dockerfile                 # imagen para desplegar en cualquier hosting (gunicorn) —
 │                                 desactualizada tras la migración a Postgres, ver
 │                                 "Dockerización" más abajo

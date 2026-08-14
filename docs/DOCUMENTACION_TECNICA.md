@@ -28,12 +28,12 @@ pisarse — dos requisitos que se volvieron necesarios apenas se definió
 desplegar en Vercel (ver §9). El esquema (tablas, columnas) ya no lo crea
 `core/database.py`: vive versionado en `supabase/migrations/`.
 
-**Esta es la arquitectura del "Plan 1" de dos**: el sistema corre completo
-sobre Postgres localmente y sigue funcionando con `python app.py`, pero
-**todavía no está desplegado en ningún lado** y el login sigue siendo el
-propio (tabla `usuarios`, `password_hash`) — el Plan 2 (ver `CLAUDE.md`)
-cubre migrar el login a Supabase Auth, las fotos de producto a Supabase
-Storage, y el deploy en sí en Vercel.
+El sistema corre sobre **Postgres** (Supabase), con **Supabase Auth** como
+almacén de credenciales y **Supabase Storage** para las fotos de producto.
+Sigue funcionando local con `python app.py` igual que siempre, y está
+preparado para desplegarse en **Vercel** (`vercel.json`, región São Paulo).
+Ver "Deploy en Vercel" en `CLAUDE.md` para el detalle de esa migración y los
+pasos manuales que quedan del lado de los paneles de Supabase y Vercel.
 
 Se eligió este stack a propósito por dos motivos: (1) es lo más simple que
 resuelve el problema — un negocio de un local con un puñado de usuarios no
@@ -73,6 +73,9 @@ tiene que poder impedir que el local venda.
 | PDF de facturas de compra | pdfplumber | Extracción de texto/tablas por posición de palabras, no solo por grilla |
 | Facturación electrónica | Afip SDK (`afip.py`) | Evita manejar certificados X.509 y SOAP/XML a mano contra WSFE de ARCA |
 | Cobro online | SDK oficial de Mercado Pago | Checkout Pro, sin manejar datos de tarjetas en este sistema |
+| Autenticación | Supabase Auth | El hashing de contraseñas deja de ser código propio a mantener, y queda la base lista para 2FA por TOTP (gratis en Supabase). Flask sigue manejando la sesión, así que la protección CSRF no cambió |
+| Fotos de producto | Supabase Storage | En Vercel no hay disco: una foto guardada en el sistema de archivos desaparece en el siguiente arranque en frío |
+| Hosting | Vercel (plan Hobby) | Gratis, detecta Flask solo, y es donde Celes ya tiene otro proyecto. Región São Paulo para quedar cerca de la base |
 | Servidor de producción | gunicorn | Flask's dev server (`app.run`) no es apto para producción |
 | Contenedor | Docker | Empaquetado para desplegar en cualquier hosting |
 
@@ -87,6 +90,8 @@ frenos_embragues_app/
 │   ├── app.py                    # rutas y lógica (el 90% de la aplicación)
 │   ├── database.py               # conexión a Postgres + helpers de consulta/siembra
 │   │                                (el esquema en sí vive en supabase/migrations/)
+│   ├── supabase_auth.py          # login y gestión de usuarios (Supabase Auth)
+│   ├── almacenamiento.py         # fotos de producto (Supabase Storage)
 │   ├── facturacion_afip.py       # integración AFIP/ARCA (Factura A/B)
 │   ├── tienda_pagos.py           # integración Mercado Pago
 │   ├── comprobante_pdf.py        # genera el PDF de un comprobante
@@ -103,13 +108,15 @@ frenos_embragues_app/
 ├── templates/                 # vistas HTML (Jinja2) — vive fuera de core/
 ├── static/                    # CSS propio, logos, fotos de producto — vive fuera de core/
 ├── docs/                      # esta documentación
+├── vercel.json                # config del deploy en Vercel (región gru1)
+├── pytest.ini                 # config de la suite de tests
 ├── Dockerfile, docker-compose.yml, .dockerignore   # desactualizados, ver §9
 ├── requirements.txt
 └── .env.example                # variables de entorno documentadas (copiar a .env),
                                    incluye DATABASE_URL
 ```
 
-Los 7 módulos de `core/` son el sistema en sí: `core/app.py` los importa
+Los 9 módulos de `core/` son el sistema en sí: `core/app.py` los importa
 directamente al arrancar. El `app.py` de la raíz es solo un *shim* de una
 línea (`from core.app import app`) para que `python app.py` y el `CMD` de
 Docker (`gunicorn app:app`) sigan funcionando sin cambios. `templates/` y
@@ -317,9 +324,17 @@ Abre en `http://127.0.0.1:5050`. La primera vez carga datos de ejemplo
 usuario admin solo** — `seed_admin_user()` se eliminó en la migración a
 Postgres porque no tiene sentido ejecutar eso en cada arranque en frío de
 un entorno serverless (ver §4). El primer admin se crea a mano, una sola
-vez, con `generate_password_hash()` + un `INSERT` directo a la tabla
-`usuarios` (comando exacto en el `README.md`) — hasta que el Plan 2 pase el
-login a Supabase Auth.
+vez, desde el panel de Supabase (Authentication → Users → Add user, con
+"Auto Confirm User" activado) más un `INSERT` en `usuarios` con ese mismo
+id — pasos exactos en el `README.md`. Las contraseñas viven en Supabase
+Auth: la tabla `usuarios` ya no guarda ningún hash.
+
+Ojo: los datos de ejemplo se siembran solo al correr `python app.py` a
+mano, desde el bloque `__main__` del `app.py` de la raíz. **No** se siembran
+al importar el módulo, que es lo que hace un entorno serverless en cada
+arranque en frío: como la condición de siembra es "la base está vacía"
+—justo el estado de una base de producción recién creada— eso le habría
+sembrado datos de mentira a la base del negocio.
 
 `DATABASE_URL` (ver §7) apunta a ese Postgres local por default
 (`postgresql://postgres:postgres@127.0.0.1:54322/postgres`); no hace falta

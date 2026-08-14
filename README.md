@@ -54,21 +54,29 @@ depender de internet.
    vacía (el sistema ya usa ese valor si no está definida); si se levantó
    en otro puerto o se apunta a otra base, completarla ahí.
 
-7. Crear el primer usuario admin. Todavía no hay una pantalla para esto
-   (queda para cuando el login pase a Supabase Auth, ver el Plan 2 en
-   `CLAUDE.md`) — se hace a mano, una sola vez:
+   Completar también `SUPABASE_URL`, `SUPABASE_ANON_KEY` y
+   `SUPABASE_SERVICE_ROLE_KEY` con los valores que imprimió
+   `npx supabase start` (`API URL`, `publishable key` y `secret key`): de ahí
+   salen el login y las fotos de producto.
 
-   ```
-   python -c "from werkzeug.security import generate_password_hash; print(generate_password_hash('elegí-una-contraseña'))"
-   ```
+7. Crear el primer usuario admin, una sola vez. Las contraseñas viven en
+   Supabase Auth, así que se crea desde **Studio** (la URL del paso 5):
 
-   Copiar el hash que imprime y pegarlo en un INSERT como este, corrido
-   desde el **SQL Editor** de Studio (la URL del paso 5):
+   - **Authentication → Users → Add user**, con **"Auto Confirm User"
+     activado**. Sin eso la cuenta queda pendiente de confirmación por mail y
+     no puede entrar.
+   - Copiar el UUID que queda a la vista y, desde el **SQL Editor**, crear su
+     perfil con ese mismo id:
 
    ```sql
-   INSERT INTO usuarios (username, password_hash, nombre, rol)
-   VALUES ('admin', 'PEGAR_EL_HASH_ACA', 'Nombre y Apellido', 'admin');
+   INSERT INTO usuarios (id, username, email, nombre, rol, activo, debe_cambiar_password)
+   VALUES ('PEGAR_EL_UUID_ACA', 'admin', 'el@mismo.email',
+           'Nombre y Apellido', 'admin', true, false);
    ```
+
+   Desde ahí en adelante, el resto de los usuarios se dan de alta desde la
+   pantalla `/usuarios`. Se entra con el nombre de usuario o con el email,
+   indistinto.
 
 ## Cómo usarlo (cada vez que quieran abrir el sistema)
 
@@ -127,8 +135,18 @@ Por default corren contra el mismo Postgres local de la instalación
 apuntar a otra base con la variable `DATABASE_URL_TEST`. La suite deja la
 base de pruebas limpia (sin datos de ejemplo) al terminar cada test, así
 que es segura de correr las veces que haga falta — pero no correrla contra
-la base que tiene los datos reales del negocio. Ver "Migración a Postgres"
-en `CLAUDE.md` para más detalle sobre cómo está armada.
+la base que tiene los datos reales del negocio. Antes de empezar verifica
+que la base del puerto sea la de este proyecto y, si no lo es, corta con un
+mensaje explicando qué pasó (suele ser otro proyecto de Supabase levantado
+que se adueñó del puerto).
+
+Los tests de login y de fotos usan también los servicios de autenticación y
+de archivos de Supabase, no solo Postgres — `npx supabase start` los levanta
+todos, así que no hay nada extra que hacer. Corren contra esos servicios de
+verdad y no contra simulaciones.
+
+Ver "Migración a Postgres" y "Deploy en Vercel" en `CLAUDE.md` para más
+detalle sobre cómo está armada.
 
 ## Configuración (base de datos, facturación electrónica, tienda online, mail)
 
@@ -140,27 +158,71 @@ online y el envío de comprobantes por mail simplemente avisan que no están
 configurados todavía, sin romper ninguna venta. El `.env` nunca se sube al
 repositorio ni se comparte por chat.
 
-## Desplegar con Docker
+## Publicarlo en internet (Vercel + Supabase)
+
+El sistema ya está preparado para esto. Los pasos son estos, en orden:
+
+**1. Subir el esquema de la base al proyecto de Supabase**
 
 ```
-docker compose up --build
+npx supabase link --project-ref <ref-del-proyecto>
+npx supabase db push
 ```
 
-**Desactualizado**: este `Dockerfile`/`docker-compose.yml` se escribieron
-para la versión en SQLite (asumen un volumen de disco local para la base)
-y todavía no se actualizaron tras la migración a Postgres — ver la nota al
-principio de la sección "Dockerización" de `CLAUDE.md`. Además, el plan de
-despliegue elegido ya no es este camino sino Vercel + Supabase (ver "Plan
-1 de 2" en `CLAUDE.md`), así que puede que este `Dockerfile` quede
-directamente reemplazado más adelante en vez de actualizado.
+**2. Crear el bucket de las fotos**
+
+En el panel de Supabase: Storage → New bucket → nombre `productos`, marcado
+**público**. Es público porque las fotos se muestran en la tienda online, que
+no tiene login.
+
+**3. Crear el proyecto en Vercel** y conectarlo a este repositorio. Vercel
+detecta Flask solo; `vercel.json` ya fija la región São Paulo (`gru1`), que es
+donde está la base — y eso importa: lo que manda la velocidad es la distancia
+entre la función y la base, no entre el usuario y la base.
+
+**4. Cargar las variables de entorno en Vercel.** Están todas documentadas en
+`.env.example`, separadas en obligatorias y opcionales. Las obligatorias son
+seis: `DATABASE_URL`, `SECRET_KEY`, `SESSION_COOKIE_SECURE=1`, `SUPABASE_URL`,
+`SUPABASE_ANON_KEY` y `SUPABASE_SERVICE_ROLE_KEY`.
+
+Las de AFIP, Mercado Pago y mail son opcionales: sin ellas el sistema funciona
+igual y cada función avisa en pantalla que falta configurarla. Una venta con
+tarjeta queda marcada como pendiente de facturar (con botón de reintento), la
+venta se registra y el stock baja lo mismo.
+
+**5. Crear el primer usuario administrador.** En el panel de Supabase:
+Authentication → Users → Add user, con **"Auto Confirm User" activado** (sin
+eso la cuenta queda pendiente de confirmación y no puede entrar). Después, una
+sola vez, desde el SQL Editor:
+
+```sql
+INSERT INTO usuarios (id, username, email, nombre, rol, activo, debe_cambiar_password)
+VALUES ('<el uuid que muestra el panel>', 'celes', '<el mismo email>',
+        'Celeste', 'admin', true, false);
+```
+
+De ahí en adelante los demás usuarios se dan de alta desde `/usuarios`, sin
+volver a tocar ningún panel.
+
+**Cómo se entra:** con el nombre de usuario **o** con el email, indistinto.
+
+### Y el Dockerfile qué
+
+`Dockerfile` y `docker-compose.yml` quedaron de cuando el sistema usaba
+SQLite: asumen un volumen de disco local para la base, que ya no existe. Se
+conservan solamente como salida hacia un VPS si algún día se quiere dejar
+Vercel, pero **no están actualizados** y el camino de despliegue es el de
+arriba.
 
 ## Compartir el sistema entre varias personas
 
-Hoy el sistema corre en una sola computadora, y las demás personas de esa
-misma red Wi-Fi/local pueden acceder desde su navegador usando la IP de esa
-computadora en vez de `127.0.0.1` (por ejemplo `http://192.168.0.15:5050`).
-Para que sea accesible desde cualquier lado, el siguiente paso es
-desplegarlo (ver "Próximos pasos sugeridos" abajo).
+Una vez desplegado en Vercel, cada persona entra con su propio usuario desde
+cualquier lado, sin instalar nada. Los usuarios se dan de alta desde
+`/usuarios` (hace falta ser administrador).
+
+Mientras corra solo en una computadora, las demás personas de esa misma red
+Wi-Fi pueden entrar usando la IP de esa computadora en vez de `127.0.0.1`
+(por ejemplo `http://192.168.0.15:5050`).
 
 ## Respaldo de la información
 
