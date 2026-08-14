@@ -1568,40 +1568,86 @@ npx supabase db push
 
 - [ ] **Step 6: 👤 Cargar las variables de entorno en Vercel**
 
-Todas las de `.env.example`, más las que ya existían (`AFIPSDK_*`,
-`MERCADOPAGO_*`, `SMTP_*`). `STORE_BASE_URL` pasa a ser la URL pública real de
-Vercel — eso **destraba el webhook de Mercado Pago**, que hasta ahora no podía
-funcionar por no tener una URL alcanzable desde internet.
+**Obligatorias** (sin estas el sistema no arranca o arranca roto):
+`DATABASE_URL`, `SECRET_KEY`, `SESSION_COOKIE_SECURE=1`, `SUPABASE_URL`,
+`SUPABASE_ANON_KEY`, `SUPABASE_SERVICE_ROLE_KEY`.
 
-- [ ] **Step 7: 👤 Crear el primer admin**
+**Opcionales, y hoy no existen** (`AFIPSDK_*`, `MERCADOPAGO_*`, `SMTP_*`):
+se dejan sin cargar. **Esto no bloquea el deploy ni rompe nada** — los tres
+módulos que las usan están escritos para no lanzar excepciones cuando falta
+configuración, y así están probados desde antes de esta migración:
 
-Panel de Supabase → Authentication → Users → Add user (con "Auto Confirm User"
-activado). Después, una sola vez, desde el SQL Editor:
+| Falta | Qué pasa | Qué NO pasa |
+|---|---|---|
+| `AFIPSDK_ACCESS_TOKEN` | Una venta con tarjeta o transferencia queda marcada `facturacion_estado='sin_configurar'`, con un botón "Reintentar facturación" en el comprobante | La venta se registra igual y el stock se descuenta igual. No se pierde nada |
+| `MERCADOPAGO_ACCESS_TOKEN` | El checkout de la tienda avisa que el cobro online no está disponible y ofrece el WhatsApp del negocio | El catálogo y el carrito funcionan igual |
+| `SMTP_*` | El botón "Enviar por mail" del comprobante avisa que falta configurar el envío | El comprobante se genera y se imprime igual |
+
+Cuando esas cuentas existan se cargan las variables y las tres funciones se
+activan solas, sin tocar código ni volver a desplegar a mano.
+
+`STORE_BASE_URL` sí conviene cargarla con la URL pública de Vercel desde el
+primer día: es lo que **destraba el webhook de Mercado Pago** el día que haya
+cuenta, y no cuesta nada dejarla lista.
+
+- [ ] **Step 7: 👤 Crear el primer admin (la cuenta de Celes)**
+
+Celes es la usuaria principal al arrancar, con rol `admin` — es quien va a
+cargar los datos y dar de alta al resto. Los usuarios del negocio se crean
+después desde `/usuarios`, ya sin tocar ningún panel.
+
+Panel de Supabase → Authentication → Users → Add user, con **"Auto Confirm
+User" activado** (si no, la cuenta queda pendiente de confirmación y no puede
+entrar). Después, una sola vez, desde el SQL Editor:
 
 ```sql
 INSERT INTO usuarios (id, username, email, nombre, rol, activo, debe_cambiar_password)
-VALUES ('<el uuid que muestra el panel>', 'matias', '<el mismo email>',
-        'Matías', 'admin', true, false);
+VALUES ('<el uuid que muestra el panel>', 'celes', '<el mismo email>',
+        'Celeste', 'admin', true, false);
 ```
+
+`debe_cambiar_password` va en `false` a propósito: la contraseña la eligió ella
+misma en el panel, no es una temporal que haya que cambiar al entrar.
 
 - [ ] **Step 8: Verificación en el deploy real**
 
 Con la URL de Vercel ya andando, verificar a mano y **reportar el resultado de
 cada punto** (no darlos por buenos):
 
-1. `/login` entra con el admin recién creado.
+1. `/login` entra con la cuenta admin recién creada.
 2. Se puede entrar con el username **y** con el email.
-3. Cargar un producto con foto: la foto se ve en `/productos` y en `/tienda`.
-4. Registrar una venta de punta a punta.
-5. **El gotcha de CSRF con HTTPS**: `WTF_CSRF_SSL_STRICT` (default `True`)
+3. `/usuarios` es accesible (confirma que el rol admin quedó bien cargado).
+4. Cargar un producto con foto: la foto se ve en `/productos` y en `/tienda`.
+5. Registrar una venta **en efectivo** de punta a punta: tiene que generar el
+   remito interno de siempre. Es el camino que no depende de AFIP.
+6. Registrar una venta **con tarjeta**: la venta se registra, el stock baja, y
+   el comprobante muestra el aviso de facturación pendiente con el botón de
+   reintento. **Eso es lo correcto sin cuenta de AFIP, no un error** — lo que
+   habría que reportar es que la venta no se registre o que la pantalla se
+   rompa.
+7. **El gotcha de CSRF con HTTPS**: `WTF_CSRF_SSL_STRICT` (default `True`)
    exige un header `Referer` del mismo origen en cada POST. Probar un POST
    real (guardar un cliente) y confirmar que no aparece el error de "página
    desactualizada". Si aparece, es este el motivo.
-6. `/tienda` carga sin sesión iniciada.
-7. Que el proxy quedó bien: en una pantalla cualquiera, que los links sean
+8. `/tienda` carga sin sesión iniciada. El checkout avisa que el cobro online
+   no está disponible — correcto sin cuenta de Mercado Pago.
+9. Que el proxy quedó bien: en una pantalla cualquiera, que los links sean
    `https://` y no `http://`.
 
 - [ ] **Step 9: Commit final si hubo correcciones**
+
+---
+
+### Lo que queda pendiente después de este plan (no lo bloquea)
+
+Ninguna de estas cosas impide desplegar ni usar el sistema. Se activan solas
+cuando existan las cuentas, cargando la variable correspondiente:
+
+- **Cuenta de AFIP/ARCA** (`app.afipsdk.com`) → factura electrónica real.
+- **Cuenta de Mercado Pago** → cobro online en la tienda.
+- **Credenciales SMTP** → envío del comprobante por mail.
+- **Datos reales del negocio** → `scripts/importar_datos.py` con la plantilla
+  completada.
 
 ---
 
