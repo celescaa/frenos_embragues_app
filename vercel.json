@@ -3,9 +3,8 @@
   "regions": ["gru1"],
   "functions": {
     "app.py": {
-      "runtime": "python3.12",
       "maxDuration": 300,
-      "excludeFiles": "{scripts,docs,plantillas,listas_proveedores,tests,supabase}/**"
+      "excludeFiles": "{scripts/**,docs/**,plantillas/**,listas_proveedores/**,tests/**,supabase/**}"
     }
   }
 }
