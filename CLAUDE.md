@@ -26,6 +26,19 @@ funciona con un Excel y sin sistema de clientes ni stock.
   `templates/base.html` (variables CSS `--si-black` / `--si-gold`) y el dict
   `NEGOCIO` en `app.py`, que además inyecta estos datos a todos los templates
   vía `inject_negocio()`. Si cambia algún dato del negocio, se edita solo ahí.
+- **Favicon (14/08/2026)**: el disco del logo sobre el negro de la marca, en
+  `static/img/` (`favicon.ico` con 16/32/48 px, `favicon-32.png`,
+  `favicon-192.png` para Android, `apple-touch-icon.png` de 180 px para
+  "Agregar a inicio" en iPhone). Lo genera `scripts/generar_favicon.py` desde
+  `logo_icon_soft.png` — hay que volver a correrlo solo si cambia el logo.
+  Ese script **apaga el halo blanco difuso** del PNG original con una curva
+  sobre el canal alfa: sin eso, a 16 px el halo empasta las aspas y el ícono
+  se ve como una mancha gris. Los `<link>` viven en un partial,
+  `templates/_favicon.html`, incluido desde los tres templates que tienen
+  `<head>` propio: `base.html` (sistema), `base_publica.html` (tienda) y
+  `login.html`. Se ve también sin sesión iniciada porque el endpoint `static`
+  ya estaba en `ENDPOINTS_PUBLICOS` (si no, el navegador se comería el
+  redirect a `/login` al pedir el ícono).
 
 ## Objetivo final
 
@@ -1166,6 +1179,8 @@ frenos_embragues_app/
 │   │                                        precios contra el catálogo ya cargado
 │   ├── seed_datos_prueba.py            # proveedores REALES + datos de prueba para todas
 │   │                                     las pantallas (ver la sección dedicada)
+│   ├── generar_favicon.py              # rearma el favicon desde el logo (solo si cambia
+│   │                                     el logo; necesita Pillow, no está en requirements)
 │   └── archivo/                        # scripts de un solo uso, ya cumplieron su función
 │       └── cargar_ejemplo_proveedores.py
 │
