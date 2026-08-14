@@ -87,6 +87,71 @@ def pg_url():
     return PG_URL_TEST
 
 
+# Supabase local (el que levanta `npx supabase start`). Estas claves son los
+# valores por defecto de la CLI: son idénticas en cualquier máquina, no dan
+# acceso a nada real y no son un secreto. Quedan overrideables por si alguien
+# corre la suite contra otra instancia.
+SUPABASE_URL_TEST = os.environ.get("SUPABASE_URL_TEST", "http://127.0.0.1:54321")
+SUPABASE_SERVICE_KEY_TEST = os.environ.get(
+    "SUPABASE_SERVICE_ROLE_KEY_TEST", "sb_secret_N7UND0UgjKTVK-Uodkm0Hg_xSvEMPvz"
+)
+
+
+@pytest.fixture
+def crear_usuario(db_conn):
+    """Crea un usuario completo: la cuenta en Supabase Auth (donde viven email
+    y contraseña) más su fila en `usuarios` (el perfil).
+
+    Contra el Supabase Auth LOCAL, no contra un mock: lo que esta migración
+    cambia es justamente el diálogo con ese servicio, así que un mock no
+    probaría nada de lo que hay que probar.
+
+    `email_confirm=True` es obligatorio -- sin eso la cuenta queda pendiente
+    de confirmación por mail y no puede iniciar sesión.
+
+    Lleva su propia limpieza porque el fixture `_limpiar_base_de_pruebas`
+    trunca la tabla `usuarios` pero NO borra las cuentas del lado de Supabase:
+    sin esto, la segunda corrida de la suite fallaría con "email ya
+    registrado".
+    """
+    from supabase import create_client
+
+    admin = create_client(SUPABASE_URL_TEST, SUPABASE_SERVICE_KEY_TEST)
+    creados = []
+
+    def _crear(username, password="clave-de-prueba-123", rol="empleado",
+               nombre="Usuario Test", activo=True, debe_cambiar_password=False,
+               email=None):
+        email = email or f"{username}@ejemplo.test"
+        cuenta = admin.auth.admin.create_user(
+            {"email": email, "password": password, "email_confirm": True}
+        )
+        usuario_id = cuenta.user.id
+        creados.append(usuario_id)
+        # password_hash se sigue escribiendo MIENTRAS DURE LA TRANSICIÓN: el
+        # login todavía valida contra esa columna, y lo hará hasta que el
+        # código pase a Supabase Auth. Se saca junto con la columna.
+        from werkzeug.security import generate_password_hash
+        db_conn.execute(
+            """INSERT INTO usuarios (id, username, email, password_hash, nombre, rol,
+                                     activo, debe_cambiar_password)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s)""",
+            (usuario_id, username, email, generate_password_hash(password), nombre,
+             rol, activo, debe_cambiar_password),
+        )
+        db_conn.commit()
+        return {"id": usuario_id, "username": username, "email": email,
+                "password": password, "rol": rol, "nombre": nombre}
+
+    yield _crear
+
+    for usuario_id in creados:
+        try:
+            admin.auth.admin.delete_user(usuario_id)
+        except Exception:
+            pass  # el propio test pudo haberlo borrado ya
+
+
 @pytest.fixture
 def db_conn(pg_url):
     """Conexión con rollback automático: nada de lo que escribe un test queda."""

@@ -4,6 +4,7 @@ Las dos correcciones del diseño (plata a decimal exacto, fechas a tipos de
 fecha) se verifican acá porque un error silencioso en un tipo es de los más
 caros de descubrir tarde.
 """
+import psycopg
 import pytest
 
 # Las 21 columnas de plata que dejan de ser flotantes (ver el spec).
@@ -73,3 +74,28 @@ def test_usuarios_usa_uuid(db_conn):
     """En el Plan 2 este id se liga a auth.users de Supabase Auth. Se define
     como uuid desde ahora para no cambiar el tipo dos veces."""
     assert tipo_de(db_conn, "usuarios", "id") == "uuid"
+
+
+def test_usuarios_tiene_email_unico(db_conn, crear_usuario):
+    """El email vive en Supabase Auth, pero se copia acá para resolver el
+    login "por usuario o por email" con una sola consulta a nuestra base. Si
+    dos perfiles compartieran email, el login por email no sabría a cuál de
+    los dos corresponde la sesión."""
+    assert tipo_de(db_conn, "usuarios", "email") == "text"
+    usuario = crear_usuario("primero")
+    otro = crear_usuario("segundo")
+    with pytest.raises(psycopg.errors.UniqueViolation):
+        db_conn.execute(
+            "UPDATE usuarios SET email=%s WHERE id=%s", (usuario["email"], otro["id"])
+        )
+
+
+def test_el_hash_de_contrasena_ya_no_es_obligatorio(db_conn):
+    """Los usuarios creados vía Supabase Auth no tienen hash propio: su
+    contraseña vive del otro lado. La columna se borra del todo más adelante,
+    cuando ya no la lea nadie."""
+    fila = db_conn.execute(
+        """SELECT is_nullable FROM information_schema.columns
+           WHERE table_name='usuarios' AND column_name='password_hash'"""
+    ).fetchone()
+    assert fila["is_nullable"] == "YES"

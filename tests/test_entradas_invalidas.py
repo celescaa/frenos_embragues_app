@@ -32,11 +32,6 @@ def _producto(conn, nombre="Disco Ventilado", stock=5):
     ).fetchone()["id"]
 
 
-def _usuario_admin(conn):
-    return conn.execute(
-        """INSERT INTO usuarios (username, password_hash, nombre, rol, activo, debe_cambiar_password)
-           VALUES ('admin_entradas', 'x', 'Admin Test', 'admin', TRUE, FALSE) RETURNING id"""
-    ).fetchone()["id"]
 
 
 @pytest.fixture
@@ -48,9 +43,10 @@ def cliente_publico():
 
 
 @pytest.fixture
-def cliente_admin(db_conn):
-    usuario_id = _usuario_admin(db_conn)
-    db_conn.commit()
+def cliente_admin(crear_usuario):
+    # Vía `crear_usuario`: desde que usuarios.id es clave foránea de
+    # auth.users, un perfil insertado a mano no tiene cuenta donde apoyarse.
+    usuario_id = crear_usuario("admin_entradas", rol="admin", nombre="Admin Test")["id"]
     flask_app.config["TESTING"] = True
     flask_app.config["WTF_CSRF_ENABLED"] = False
     with flask_app.test_client() as c:

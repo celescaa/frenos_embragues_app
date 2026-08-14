@@ -53,14 +53,13 @@ def test_el_catalogo_de_la_tienda_busca_sin_distinguir_mayusculas(db_conn):
         assert b"Disco Ventilado" in respuesta.data
 
 
-def test_el_bloqueo_por_intentos_usa_marca_de_tiempo(db_conn):
+def test_el_bloqueo_por_intentos_usa_marca_de_tiempo(db_conn, crear_usuario):
     """bloqueado_hasta pasó de texto a timestamptz: ya no se parsea a mano."""
     from datetime import datetime, timezone, timedelta
+    usuario = crear_usuario("bloqueado", nombre="Test")
     futuro = datetime.now(timezone.utc) + timedelta(minutes=15)
     db_conn.execute(
-        """INSERT INTO usuarios (username, password_hash, nombre, bloqueado_hasta)
-           VALUES ('bloqueado', 'x', 'Test', %s)""",
-        (futuro,),
+        "UPDATE usuarios SET bloqueado_hasta=%s WHERE id=%s", (futuro, usuario["id"])
     )
     fila = db_conn.execute(
         "SELECT bloqueado_hasta FROM usuarios WHERE username = 'bloqueado'"
@@ -103,18 +102,15 @@ def _producto(conn, nombre, precio_venta, stock, categoria="Frenos"):
     ).fetchone()["id"]
 
 
-def _usuario_admin(conn, username="admin_test"):
-    return conn.execute(
-        """INSERT INTO usuarios (username, password_hash, nombre, rol, activo, debe_cambiar_password)
-           VALUES (%s, 'x', 'Admin Test', 'admin', TRUE, FALSE) RETURNING id""",
-        (username,),
-    ).fetchone()["id"]
-
-
 @pytest.fixture
-def client_admin(db_conn):
-    usuario_id = _usuario_admin(db_conn)
-    db_conn.commit()
+def client_admin(crear_usuario):
+    """Sesión de admin ya iniciada.
+
+    Usa el fixture `crear_usuario`, que crea también la cuenta en Supabase
+    Auth: desde que `usuarios.id` es clave foránea de `auth.users`, un perfil
+    insertado a mano no tiene dónde apoyarse y la base lo rechaza.
+    """
+    usuario_id = crear_usuario("admin_test", rol="admin", nombre="Admin Test")["id"]
     flask_app.config["TESTING"] = True
     flask_app.config["WTF_CSRF_ENABLED"] = False
     with flask_app.test_client() as c:
@@ -155,18 +151,13 @@ def test_dashboard_carga_con_ventas_y_agrupa_top_por_id(client_admin, db_conn):
     assert "Disco de freno" in cuerpo
 
 
-def test_login_bloquea_tras_5_intentos_y_no_revienta_al_leer_el_bloqueo(db_conn):
+def test_login_bloquea_tras_5_intentos_y_no_revienta_al_leer_el_bloqueo(db_conn, crear_usuario):
     """Contra el código previo, ya el primer POST revienta (`?` en el SELECT
     de usuarios). Portado: 5 intentos con contraseña incorrecta bloquean la
     cuenta, y un 6to intento (aunque la contraseña sea correcta) tiene que
     avisar que sigue bloqueada, sin TypeError por mezclar datetime naive/
     tz-aware."""
-    from werkzeug.security import generate_password_hash
-    db_conn.execute(
-        "INSERT INTO usuarios (username, password_hash, nombre, rol) VALUES (%s, %s, 'Test', 'empleado')",
-        ("bloqueame", generate_password_hash("correcta123")),
-    )
-    db_conn.commit()
+    crear_usuario("bloqueame", password="correcta123", nombre="Test")
 
     flask_app.config["TESTING"] = True
     flask_app.config["WTF_CSRF_ENABLED"] = False
@@ -188,13 +179,12 @@ def test_login_bloquea_tras_5_intentos_y_no_revienta_al_leer_el_bloqueo(db_conn)
     assert fila["bloqueado_hasta"] is not None
 
 
-def test_usuarios_editar_usa_convertidor_uuid(client_admin, db_conn):
+def test_usuarios_editar_usa_convertidor_uuid(client_admin, crear_usuario):
     """La ruta tiene que aceptar un id con forma de UUID en la URL. Contra
     el código previo (`<int:usuario_id>`), Flask ni siquiera matchea la
     ruta con un id así -- 404 antes de llegar al handler."""
     client, _ = client_admin
-    otro = _usuario_admin(db_conn, username="otro_admin")
-    db_conn.commit()
+    otro = crear_usuario("otro_admin", rol="admin")["id"]
 
     respuesta = client.get(f"/usuarios/{otro}/editar")
     assert respuesta.status_code == 200
