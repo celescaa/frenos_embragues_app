@@ -108,3 +108,109 @@ def test_fecha_tolera_varios_formatos_de_entrada():
     assert _fecha("13/08/2026") == esperado
     assert _fecha("13-08-2026") == esperado
     assert _fecha("2026/08/13") == esperado
+
+
+# --------------------------------------------------------------------------
+# scripts/seed_datos_prueba.py
+# --------------------------------------------------------------------------
+def test_el_seed_carga_los_13_proveedores_reales(db_conn):
+    """Los proveedores son el dato REAL del negocio: si el seed carga de
+    menos, la parte que sí va a producción queda incompleta."""
+    from scripts.seed_datos_prueba import PROVEEDORES_REALES, sembrar_proveedores
+
+    ids = sembrar_proveedores(db_conn)
+    assert len(ids) == len(PROVEEDORES_REALES) == 13
+    cargados = db_conn.execute("SELECT COUNT(*) AS c FROM proveedores").fetchone()["c"]
+    assert cargados == 13
+
+    fila = db_conn.execute(
+        "SELECT * FROM proveedores WHERE nombre='Icepar'"
+    ).fetchone()
+    assert fila["cuit"] == "33-51966896-0"
+    assert fila["activo"] is True
+
+
+def test_el_seed_no_duplica_proveedores_al_correrlo_de_nuevo(db_conn):
+    """Es la garantía que permite correr la parte de proveedores en
+    producción sin miedo: la segunda corrida actualiza, no duplica."""
+    from scripts.seed_datos_prueba import sembrar_proveedores
+
+    primeros = sembrar_proveedores(db_conn)
+    segundos = sembrar_proveedores(db_conn)
+
+    assert primeros == segundos, "los ids tienen que ser los mismos"
+    assert db_conn.execute("SELECT COUNT(*) AS c FROM proveedores").fetchone()["c"] == 13
+
+
+def test_el_seed_reconoce_por_cuit_un_proveedor_ya_cargado_a_mano(db_conn):
+    """El CUIT identifica al proveedor mejor que el nombre: si alguien ya lo
+    cargó desde /proveedores con otra grafía, el seed tiene que actualizar esa
+    fila en vez de crear un duplicado con el nombre de la planilla."""
+    from scripts.seed_datos_prueba import sembrar_proveedores
+
+    db_conn.execute(
+        "INSERT INTO proveedores (nombre, cuit) VALUES ('RONCAL REPUESTOS', '30-53361668-9')"
+    )
+    sembrar_proveedores(db_conn)
+
+    filas = db_conn.execute(
+        "SELECT nombre FROM proveedores WHERE cuit='30-53361668-9'"
+    ).fetchall()
+    assert len(filas) == 1, "no debe duplicar un proveedor que ya estaba por CUIT"
+    assert filas[0]["nombre"] == "Roncal Repuestos S.A"
+
+
+def test_el_seed_de_prueba_deja_las_pantallas_con_datos(db_conn):
+    """Un solo test para el conjunto: si alguna parte del seed se rompe, la
+    pantalla que dependía de ella queda vacía sin que nadie se entere."""
+    from scripts.seed_datos_prueba import sembrar_datos_prueba, sembrar_proveedores
+
+    sembrar_datos_prueba(db_conn, sembrar_proveedores(db_conn))
+
+    def contar(tabla):
+        return db_conn.execute(f"SELECT COUNT(*) AS c FROM {tabla}").fetchone()["c"]
+
+    for tabla in [
+        "clientes", "productos", "producto_proveedor", "ventas", "venta_items",
+        "compras", "compra_items", "cuenta_corriente_movimientos",
+        "cuenta_corriente_movimiento_items", "promociones_aplicadas",
+        "promocion_productos", "movimientos_no_facturados", "pedidos_web",
+        "pedido_web_items",
+    ]:
+        assert contar(tabla) > 0, f"{tabla} quedó vacía"
+
+    # Al menos un cliente debiendo plata, si no /clientes/top-deudores no
+    # muestra nada.
+    deudores = db_conn.execute(
+        """SELECT SUM(CASE WHEN tipo='cargo' THEN monto ELSE -monto END) AS saldo
+           FROM cuenta_corriente_movimientos GROUP BY cliente_id"""
+    ).fetchall()
+    assert any(f["saldo"] > 0 for f in deudores)
+
+    # Y al menos un producto bajo el mínimo cuyo proveedor más barato NO sea
+    # el de la ficha: es el caso que /pedidos marca con "mejor precio".
+    assert db_conn.execute(
+        """SELECT COUNT(*) AS c FROM productos p
+           WHERE p.stock_actual <= p.stock_minimo AND p.stock_minimo > 0
+             AND NOT p.pedido_pendiente
+             AND EXISTS (SELECT 1 FROM producto_proveedor pp
+                         WHERE pp.producto_id = p.id AND pp.proveedor_id <> p.proveedor_id
+                           AND pp.precio_costo < (SELECT precio_costo FROM producto_proveedor
+                                                  WHERE producto_id = p.id AND proveedor_id = p.proveedor_id))"""
+    ).fetchone()["c"] > 0
+
+
+def test_el_seed_guarda_la_plata_como_decimal(db_conn):
+    """Las columnas de plata son NUMERIC: un float en el seed entra igual
+    (Postgres lo castea) pero arrastra el error de redondeo del float hasta
+    ahí. El seed construye Decimal desde strings, no desde float."""
+    from decimal import Decimal as D
+
+    from scripts.seed_datos_prueba import sembrar_datos_prueba, sembrar_proveedores
+
+    sembrar_datos_prueba(db_conn, sembrar_proveedores(db_conn))
+    fila = db_conn.execute(
+        "SELECT precio_costo, precio_venta FROM productos WHERE codigo='EMB-VOL-001'"
+    ).fetchone()
+    assert fila["precio_costo"] == D("268000.00")
+    assert fila["precio_venta"] == D("429000.00")
