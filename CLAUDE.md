@@ -92,8 +92,10 @@ Implementado y probado end-to-end:
 - Panel de analítica: ventas del mes, histórico, gráfico de ventas por mes,
   top 5 productos, top 5 clientes, alertas de reposición.
 
-Base actual: 5 clientes, 14 productos, 3 proveedores, 45 ventas — **todos de
-ejemplo**, falta cargar los datos reales.
+Base local (sembrada con `scripts/seed_datos_prueba.py`, ver la sección
+dedicada más abajo): **los 13 proveedores son reales**; los 10 clientes, 29
+productos y 62 ventas son de prueba. Falta cargar los productos, clientes y
+el stock reales.
 
 Agregado después:
 
@@ -1058,6 +1060,82 @@ El bucket `productos` lo crea la propia suite si falta
 (`almacenamiento.asegurar_bucket()`); en producción se crea una vez desde el
 panel.
 
+## Seed de datos: proveedores reales + datos de prueba (14/08/2026)
+
+`scripts/seed_datos_prueba.py` reemplaza a `db.seed_demo_data()` como forma de
+llenar una base vacía. La diferencia que justifica el script aparte: tiene
+**dos partes separadas a propósito**, porque una es dato real del negocio y la
+otra es inventada.
+
+**Parte 1 — los 13 proveedores reales** (`PROVEEDORES_REALES`), tal como Celes
+los pasó en la hoja PROVEEDORES de `plantillas/Plantilla_Carga_Datos.xlsx`:
+Roncal Repuestos S.A, Eine s.r.l, Icepar, Michelli, Distrisuper, Miguel Angel
+Sen-Sei, Papierttei, RM, Rio, Rodamitre, Deboto, Zerbini y Omar. Son los
+mismos nombres que ya aparecían en las listas de precios y en
+`Planilla_Stock_Por_Proveedor_completa.xlsx`. Esta parte **sí se puede correr
+en producción** (`--solo-proveedores`).
+
+- **Los datos se copiaron literales, sin corregir**: "av.Hipolito Yrigoyen
+  10253", "Pringuel 139 caba", "martin de gaiza 801", "Deboto" (aunque su
+  propio email diga `distribuidoradevoto@`). Adivinar un nombre de calle o una
+  razón social es peor que dejar el dato como vino; se edita desde
+  `/proveedores` cuando alguien del negocio lo confirme.
+- **Dos datos siguen incompletos y no se inventaron**: Miguel Angel Sen-Sei
+  tiene el CUIT `20-2208807-03`, que son 10 dígitos (le falta uno) y se carga
+  literal; Omar no tiene CUIT ni email. El CUIT de Icepar, que en la planilla
+  decía solo `R`, lo completó Celes: `33-51966896-0`.
+- **La idempotencia es por CUIT primero y por nombre después.** Importa el
+  orden: el CUIT es lo que identifica de verdad a un proveedor, así que si
+  alguien ya lo cargó a mano desde `/proveedores` con otra grafía del nombre,
+  el seed actualiza esa fila en vez de crear un duplicado. Al revés (nombre
+  primero) el duplicado aparecería justo en el caso que esto viene a evitar.
+  Con test propio.
+
+**Parte 2 — datos de prueba** (10 clientes, 29 productos con categoría y
+subcategoría de la taxonomía real, 23 cotizaciones, 62 ventas de los últimos 5
+meses, 5 compras, cuenta corriente, promociones, movimientos sin factura y
+pedidos de la tienda). No es relleno: cada bloque existe para que una pantalla
+concreta tenga qué mostrar.
+
+- Tres productos quedan **bajo el mínimo y con el proveedor más barato
+  distinto al de la ficha** (FR-PAS-001, FR-DIS-002, ROD-001), que es el caso
+  que `/pedidos` agrupa por proveedor conveniente, marca con la insignia
+  "mejor precio" y usa para calcular el ahorro estimado. Otros dos quedan
+  marcados como ya pedidos, para la sección "esperando que lleguen".
+- Dos ventas de hoy comparten `id_operacion` (pago mixto: parte efectivo,
+  parte tarjeta) — `/ventas/dia` las cuenta como **una sola** operación.
+- Tres cuentas corrientes en estados distintos: dos con saldo deudor (si no,
+  `/clientes/top-deudores` sale vacía) y una saldada. Una de ellas tiene
+  `tercero_cuit_dni` cargado, el caso de "el mecánico compra a nombre de otro".
+- Las tres formas de promoción: porcentaje sobre todo el catálogo, monto fijo
+  con vencimiento, y porcentaje limitado a productos puntuales.
+- **`stock_actual` es el stock de HOY, ya neto del historial.** Las ventas,
+  compras y cargos que siembra el script son historia y no vuelven a moverlo.
+  Simular el stock inicial de cada producto para que la historia "cuadre" no
+  aportaría nada a un seed y complicaría cambiar cualquier número.
+- **Las facturas quedan en `facturacion_estado='sin_configurar'`**, que es lo
+  que el sistema deja de verdad mientras no haya `AFIPSDK_ACCESS_TOKEN`. Se
+  eligió eso antes que inventar un CAE que ARCA nunca emitió: así el
+  comprobante muestra su aviso real de "reintentar facturación".
+- Plata construida con `Decimal` desde strings (nunca `float`) y fechas con
+  `db.hoy()` / `db.TZ_NEGOCIO` (nunca `datetime.now()`), por los dos motivos
+  ya documentados más arriba.
+
+`--reemplazar` borra las 15 tablas de datos y vuelve a sembrar; pide
+confirmación escrita mostrando el `DATABASE_URL` (`--sin-confirmar` la saltea,
+para tests). **No toca** `categorias`/`subcategorias` (las siembra la
+migración de Supabase) ni `usuarios` (su contraparte real vive en Supabase
+Auth). Sin `--reemplazar`, los datos de prueba se saltean si ya hay productos.
+
+`db.seed_demo_data()` quedó como estaba: varios tests dependen de él.
+
+Probado contra el Postgres local: las 21 pantallas principales responden 200
+con la base sembrada, `/pedidos` muestra las 3 insignias de mejor precio y el
+ahorro, `/ventas/dia` cuenta el pago mixto como una operación, los saldos de
+cuenta corriente dan lo esperado, `aplicar_promociones()` descuenta bien tanto
+la general como la puntual (y no toca los productos fuera de alcance), y la
+suite completa (183 tests) pasa.
+
 ## Estructura
 
 ```
@@ -1084,6 +1162,10 @@ frenos_embragues_app/
 │   ├── cargar_stock_por_proveedor.py   # importa esa planilla a la base
 │   ├── extraer_catalogo_referencia.py  # separa listas de precios completas (no stock real)
 │   │                                     de esa misma planilla, sin tocar la base
+│   ├── matchear_productos_proveedores.py  # puebla producto_proveedor cruzando listas de
+│   │                                        precios contra el catálogo ya cargado
+│   ├── seed_datos_prueba.py            # proveedores REALES + datos de prueba para todas
+│   │                                     las pantallas (ver la sección dedicada)
 │   └── archivo/                        # scripts de un solo uso, ya cumplieron su función
 │       └── cargar_ejemplo_proveedores.py
 │
@@ -1164,8 +1246,10 @@ Orden acordado con Celes (actualizado 04/08/2026):
    dedicada más abajo. Falta un solo paso para que factura de verdad: crear
    la cuenta gratuita en app.afipsdk.com y completar el `.env` con el
    `access_token` (no es algo que se pueda hacer en nombre del negocio).
-4. **Cargar datos reales**: ya está la planilla y el importador. Falta que el
-   hermano la complete con clientes, productos y proveedores reales.
+4. **Cargar datos reales**: ya está la planilla y el importador. Los **13
+   proveedores reales ya están** (`scripts/seed_datos_prueba.py`, corriéndolo
+   con `--solo-proveedores` se cargan sin datos de prueba). Falta que el
+   hermano complete clientes, productos y el stock real.
 5. ~~Tienda online propia~~ (reemplaza la idea de integrar Tiendanube) —
    **código listo**, ver la sección dedicada más abajo. Falta lo mismo que
    con AFIP: que el negocio cree su cuenta de Mercado Pago y, para probar el
