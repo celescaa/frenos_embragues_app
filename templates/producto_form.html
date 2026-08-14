@@ -20,7 +20,7 @@
         <label class="form-label">Foto del producto</label>
         {% if producto and producto.imagen %}
           <div class="d-flex align-items-center gap-3 mb-2">
-            <img src="{{ url_for('static', filename='img/productos/' + producto.imagen) }}" alt="{{ producto.nombre }}" style="width:90px;height:90px;object-fit:cover;border-radius:8px;">
+            <img src="{{ producto.imagen|url_imagen }}" alt="{{ producto.nombre }}" style="width:90px;height:90px;object-fit:cover;border-radius:8px;">
             <div class="form-check">
               <input class="form-check-input" type="checkbox" name="eliminar_imagen" value="1" id="eliminarImagen">
               <label class="form-check-label" for="eliminarImagen">Quitar esta foto</label>

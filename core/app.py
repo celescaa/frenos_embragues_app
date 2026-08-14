@@ -20,6 +20,7 @@ from werkzeug.utils import secure_filename
 from dotenv import load_dotenv
 from urllib.parse import urlparse
 from . import database as db
+from . import almacenamiento
 from . import supabase_auth
 from . import facturacion_afip
 from . import tienda_pagos
@@ -356,9 +357,9 @@ app.jinja_env.globals["instagram_url"] = instagram_url
 app.jinja_env.filters["money"] = money
 
 
+app.jinja_env.filters["url_imagen"] = almacenamiento.url_publica
+
 EXTENSIONES_IMAGEN_PERMITIDAS = {"jpg", "jpeg", "png", "webp"}
-CARPETA_IMAGENES_PRODUCTOS = os.path.join(PROJECT_ROOT, "static", "img", "productos")
-os.makedirs(CARPETA_IMAGENES_PRODUCTOS, exist_ok=True)
 
 
 def a_decimal(valor):
@@ -392,23 +393,27 @@ def a_entero(valor, default=None):
 
 def guardar_imagen_producto(producto_id, file_storage):
     """Guarda la foto subida para un producto y devuelve el nombre de archivo
-    a guardar en productos.imagen, o None si no se subió nada válido."""
+    a guardar en productos.imagen, o None si no se subió nada válido.
+
+    La foto va a Supabase Storage, no al disco: en Vercel el disco no
+    sobrevive al siguiente arranque en frío. `productos.imagen` sigue
+    guardando solo el nombre del archivo, igual que antes -- lo que cambió es
+    de dónde lo sirve el navegador (ver el filtro `url_imagen`)."""
     if not file_storage or not file_storage.filename:
         return None
     extension = file_storage.filename.rsplit(".", 1)[-1].lower() if "." in file_storage.filename else ""
     if extension not in EXTENSIONES_IMAGEN_PERMITIDAS:
         return None
     nombre_archivo = secure_filename(f"producto_{producto_id}.{extension}")
-    file_storage.save(os.path.join(CARPETA_IMAGENES_PRODUCTOS, nombre_archivo))
+    if not almacenamiento.subir_imagen(
+        nombre_archivo, file_storage.read(), file_storage.content_type
+    ):
+        return None
     return nombre_archivo
 
 
 def eliminar_imagen_producto(nombre_archivo):
-    if not nombre_archivo:
-        return
-    ruta = os.path.join(CARPETA_IMAGENES_PRODUCTOS, nombre_archivo)
-    if os.path.exists(ruta):
-        os.remove(ruta)
+    almacenamiento.borrar_imagen(nombre_archivo)
 
 
 def productos_para_buscador(productos):
