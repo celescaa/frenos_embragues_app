@@ -1,4 +1,7 @@
 {% extends "base.html" %}
+{# Acá escanear ya significa "cargar este producto", así que se apaga el popup
+   de consulta de precio (ver templates/_escaneo_precio.html). #}
+{% block escaneo_precio %}{% endblock %}
 {% block title %}{{ 'Editar producto' if producto else 'Nuevo producto' }}{% endblock %}
 {% block content %}
 <h4 class="mb-3">{{ 'Editar producto' if producto else 'Nuevo producto' }}</h4>

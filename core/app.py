@@ -1687,7 +1687,10 @@ def api_productos_nuevo():
 def api_producto_por_codigo():
     """Busca un producto por código de barras o código interno.
 
-    Lo usa la pantalla de ventas cuando se escanea con la pistola lectora.
+    Lo usan dos cosas: la pantalla de ventas, que suma el producto a la venta
+    al escanearlo, y el popup de consulta de precio (templates/_escaneo_precio.html),
+    que se dispara al escanear en cualquier otra pantalla. De ahí que devuelva
+    marca, modelo y stock mínimo: son los datos que muestra ese popup.
     """
     codigo = request.args.get("codigo", "").strip()
     if not codigo:
@@ -1706,6 +1709,9 @@ def api_producto_por_codigo():
         "codigo": producto["codigo"],
         "precio_venta": producto["precio_venta"],
         "stock_actual": producto["stock_actual"],
+        "stock_minimo": producto["stock_minimo"],
+        "marca": producto["marca"],
+        "modelo_compatible": producto["modelo_compatible"],
     })
 
 

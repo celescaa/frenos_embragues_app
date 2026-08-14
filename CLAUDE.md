@@ -125,6 +125,38 @@ Agregado después:
   como teclado (tipea el código + Enter), busca contra
   `/api/producto-por-codigo` y suma el producto a la venta; si ya está en la
   lista le suma una unidad. Avisa si el producto no existe o está sin stock.
+- **Consulta de precio con la pistola (14/08/2026)**: escanear en cualquier
+  pantalla del sistema abre un popup con el precio en grande (para girar la
+  pantalla y mostrárselo al cliente), el nombre, marca/modelo y el stock.
+  `templates/_escaneo_precio.html` (partial incluido desde `base.html`, mismo
+  patrón que `_favicon.html`) + los campos que se le sumaron a
+  `/api/producto-por-codigo` (marca, modelo, stock mínimo).
+  - **No hace falta enfocar ningún campo**: un listener global mide el tiempo
+    entre teclas (`MS_ENTRE_TECLAS = 50`). La pistola tarda menos de 20 ms
+    entre tecla y tecla y termina con Enter; una persona no baja de 50 ms.
+    Ese umbral es el número a tocar si el lector del negocio viniera
+    configurado más lento — con la pistola real todavía no se probó.
+  - **Dos formas de no molestar**, las dos necesarias: (1) si el foco está en
+    un `input`/`textarea`/`select`, el listener no hace nada y el código entra
+    en el campo (el de código de barras de la ficha de producto, por ejemplo);
+    (2) las pantallas donde escanear ya significa "cargar este producto"
+    vacían el bloque Jinja `escaneo_precio` — Nueva venta, Nueva compra,
+    revisión de factura importada, ficha de producto, movimientos sin factura
+    y cuenta corriente. Sin (2), alcanzaba con hacer clic en un lugar vacío de
+    Nueva venta para que el popup tapara la venta a medio cargar. La tienda
+    pública (`base_publica.html`) no lo lleva: es para el comprador de
+    internet, no para el mostrador.
+  - Escanear otro producto con el popup abierto lo actualiza en lugar de
+    apilar modales, para consultar varios seguidos. Un código desconocido
+    muestra el código y un botón para dar de alta el producto.
+  - Probado: los tests cubren el endpoint y en qué pantallas se carga o no el
+    popup, pero **el listener es JS puro y eso pytest no lo ve** (mismo caso
+    ya anotado para `producto_form.html`). Se verificó en navegador real:
+    escaneo rápido abre el popup con el precio bien formateado, tipeo lento
+    no dispara nada, con el foco en el buscador el código entra completo en
+    el campo sin abrir el popup, un segundo escaneo reemplaza el contenido sin
+    apilar backdrops, y en Nueva venta el escaneo sigue sumando el producto a
+    la venta como siempre.
 - **Lista de pedidos** (`/pedidos`): productos en o bajo el mínimo agrupados
   por proveedor, con cantidad sugerida (repone hasta el doble del mínimo) y
   costo estimado por proveedor y total. Imprimible.

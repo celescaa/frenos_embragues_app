@@ -1,0 +1,132 @@
+{# Consulta de precio con la pistola lectora, disponible en cualquier pantalla.
+
+   Se incluye desde base.html, dentro del bloque `escaneo_precio`. Las pantallas
+   donde escanear ya significa "cargar este producto" (Nueva venta, Nueva compra,
+   revisión de factura, ficha de producto, movimientos sin factura y cuenta
+   corriente) vacían ese bloque para que el popup no se les cruce por delante.
+#}
+<div class="modal fade no-print" id="modalPrecio" tabindex="-1" aria-hidden="true">
+  <div class="modal-dialog modal-dialog-centered">
+    <div class="modal-content">
+      <div class="modal-header py-2">
+        <h6 class="modal-title text-muted mb-0"><i class="bi bi-upc-scan"></i> Consulta de precio</h6>
+        <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Cerrar"></button>
+      </div>
+      <div class="modal-body text-center py-4" id="modalPrecioCuerpo"></div>
+    </div>
+  </div>
+</div>
+
+<script>
+// ---------------------------------------------------------------------------
+// La pistola lectora se comporta como un teclado: "tipea" el código muy rápido
+// y termina con Enter. Eso es lo que la distingue de una persona escribiendo,
+// así que el disparo se decide por la velocidad entre teclas: no hace falta
+// enfocar ningún campo antes de escanear.
+// ---------------------------------------------------------------------------
+(function () {
+  // Una persona no llega a 50 ms entre tecla y tecla; una pistola tarda menos
+  // de 20 ms. Si tu lector viniera configurado más lento, este es el número a
+  // subir (ver CLAUDE.md, sección "Consulta de precio con la pistola").
+  const MS_ENTRE_TECLAS = 50;
+  const LARGO_MINIMO = 3;
+
+  const modalEl = document.getElementById('modalPrecio');
+  const cuerpo = document.getElementById('modalPrecioCuerpo');
+  const modal = new bootstrap.Modal(modalEl);
+
+  let buffer = '';
+  let ultimaTecla = 0;
+
+  function estaEscribiendo() {
+    // Si el foco está en un campo, el escaneo es para ese campo (el de código
+    // de barras de la ficha de producto, por ejemplo) y acá no se hace nada.
+    const el = document.activeElement;
+    if (!el) return false;
+    return el.isContentEditable ||
+           el.tagName === 'INPUT' || el.tagName === 'TEXTAREA' || el.tagName === 'SELECT';
+  }
+
+  function escapar(texto) {
+    const div = document.createElement('div');
+    div.textContent = texto == null ? '' : texto;
+    return div.innerHTML;
+  }
+
+  function pesos(valor) {
+    // Mismo formato que el filtro `money` del servidor: $12.500,50
+    const numero = Number(valor);
+    if (isNaN(numero)) return '$' + escapar(valor);
+    return '$' + numero.toLocaleString('es-AR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+  }
+
+  function mostrarProducto(p) {
+    // Todo lo que se inyecta como HTML pasa por escapar() o por Number(): son
+    // datos de la base, pero el nombre y la marca los tipea una persona.
+    const stock = Number(p.stock_actual);
+    const sinStock = stock <= 0;
+    const bajoMinimo = !sinStock && p.stock_minimo != null && stock <= Number(p.stock_minimo);
+    let colorStock = 'success', textoStock = stock + ' en stock';
+    if (sinStock) { colorStock = 'danger'; textoStock = 'Sin stock'; }
+    else if (bajoMinimo) { colorStock = 'warning text-dark'; textoStock = stock + ' en stock (bajo el mínimo)'; }
+
+    const detalle = [p.marca, p.modelo_compatible].filter(Boolean).map(escapar).join(' · ');
+
+    cuerpo.innerHTML =
+      '<div class="display-3 fw-bold lh-1">' + pesos(p.precio_venta) + '</div>' +
+      '<div class="fs-5 mt-3">' + escapar(p.nombre) + '</div>' +
+      (detalle ? '<div class="text-muted">' + detalle + '</div>' : '') +
+      '<div class="mt-3"><span class="badge text-bg-' + colorStock + '">' + textoStock + '</span></div>' +
+      '<div class="mt-3"><a class="small text-muted" href="/productos/' + Number(p.id) + '/editar">' +
+        'Ver ficha' + (p.codigo ? ' · ' + escapar(p.codigo) : '') + '</a></div>';
+    modal.show();
+  }
+
+  function mostrarDesconocido(codigo) {
+    cuerpo.innerHTML =
+      '<i class="bi bi-upc text-muted" style="font-size:2.5rem"></i>' +
+      '<div class="fs-5 mt-2">No hay ningún producto con este código</div>' +
+      '<div class="text-muted mt-1"><code>' + escapar(codigo) + '</code></div>' +
+      '<a class="btn btn-warning mt-3" href="/productos/nuevo">Dar de alta el producto</a>';
+    modal.show();
+  }
+
+  function mostrarError() {
+    cuerpo.innerHTML =
+      '<div class="fs-5">No pude consultar el precio</div>' +
+      '<div class="text-muted mt-1">Revisá la conexión y escaneá de nuevo.</div>';
+    modal.show();
+  }
+
+  function consultar(codigo) {
+    fetch('/api/producto-por-codigo?codigo=' + encodeURIComponent(codigo))
+      .then(function (r) { return r.json(); })
+      .then(function (data) {
+        // Escanear otro producto con el popup abierto lo actualiza en lugar de
+        // apilar modales, para poder consultar varios seguidos.
+        if (data.encontrado) mostrarProducto(data); else mostrarDesconocido(codigo);
+      })
+      .catch(mostrarError);
+  }
+
+  document.addEventListener('keydown', function (e) {
+    if (estaEscribiendo() || e.ctrlKey || e.altKey || e.metaKey) return;
+
+    // e.timeStamp en vez de Date.now(): lo pone el navegador con el evento y no
+    // depende de en qué momento llegue a correr este listener.
+    if (e.timeStamp - ultimaTecla > MS_ENTRE_TECLAS) buffer = '';
+    ultimaTecla = e.timeStamp;
+
+    if (e.key === 'Enter') {
+      const codigo = buffer.trim();
+      buffer = '';
+      if (codigo.length >= LARGO_MINIMO) {
+        e.preventDefault();
+        consultar(codigo);
+      }
+      return;
+    }
+    if (e.key.length === 1) buffer += e.key;
+  });
+})();
+</script>

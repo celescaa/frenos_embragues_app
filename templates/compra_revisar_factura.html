@@ -1,4 +1,7 @@
 {% extends "base.html" %}
+{# Acá escanear ya significa "cargar este producto", así que se apaga el popup
+   de consulta de precio (ver templates/_escaneo_precio.html). #}
+{% block escaneo_precio %}{% endblock %}
 {% block title %}Revisar factura | Frenos & Embragues{% endblock %}
 {% block content %}
 <h4 class="mb-1"><i class="bi bi-clipboard-check"></i> Revisar factura antes de cargar</h4>
