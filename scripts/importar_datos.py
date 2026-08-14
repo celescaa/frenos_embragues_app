@@ -126,7 +126,9 @@ def _fecha(valor):
             return datetime.strptime(texto[:10], fmt).date()
         except ValueError:
             continue
-    return datetime.now().date()
+    # db.hoy() y no datetime.now(): "hoy" es el día en Argentina, no el del
+    # reloj de la máquina donde se corra el script.
+    return db.hoy()
 
 
 # ---------------------------------------------------------------------------
@@ -212,7 +214,7 @@ def importar_productos(ws, conn, resumen):
 
 
 def importar_clientes(ws, conn, resumen):
-    hoy = datetime.now().date()
+    hoy = db.hoy()
     for fila in _filas(ws):
         nombre = _limpiar(fila[0])
         if not nombre:
@@ -264,7 +266,7 @@ def importar_ventas(ws, conn, resumen):
             else:
                 nuevo = conn.execute(
                     "INSERT INTO clientes (nombre, fecha_alta) VALUES (%s, %s) RETURNING id",
-                    (cliente_nombre, datetime.now().date()),
+                    (cliente_nombre, db.hoy()),
                 ).fetchone()
                 cliente_id = nuevo["id"]
                 resumen["clientes_nuevos"] += 1
