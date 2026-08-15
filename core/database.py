@@ -166,6 +166,93 @@ def obtener_subcategorias(conn=None, categoria_id=None, solo_activas=True):
     return filas
 
 
+# Campos de `productos` sobre los que busca el texto libre, concatenados y
+# normalizados. Tiene que coincidir EXACTAMENTE con la expresión del índice
+# `productos_texto_trgm` de la migración: si difieren, el índice deja de
+# usarse y la búsqueda se vuelve lenta sin que nada avise.
+TEXTO_PRODUCTO_SQL = """texto_busqueda(
+    coalesce(p.nombre, '') || ' ' || coalesce(p.codigo, '') || ' ' ||
+    coalesce(p.marca, '') || ' ' || coalesce(p.modelo_compatible, '')
+)"""
+
+# Lo mismo para los autos vinculados, para que escribir "palio" encuentre un
+# producto que no dice "Palio" en ninguno de sus campos pero está vinculado
+# a un Palio.
+TEXTO_VEHICULOS_SQL = """EXISTS (
+    SELECT 1 FROM producto_vehiculos pv JOIN vehiculos v ON v.id = pv.vehiculo_id
+    WHERE pv.producto_id = p.id
+      AND texto_busqueda(v.marca_auto || ' ' || v.modelo) LIKE %s
+)"""
+
+
+def _condiciones_busqueda(q=None, categoria=None, subcategoria=None, marca=None,
+                          vehiculo_id=None, solo_con_stock=False, excluir=()):
+    """Arma el WHERE compartido por buscar_productos() y facetas_productos().
+
+    `excluir` nombra filtros a NO aplicar: los contadores de cada filtro se
+    calculan sin aplicarse a sí mismos, para que digan cuántos productos
+    habría si el usuario cambiara de opción (si no, el filtro elegido siempre
+    mostraría su propio total y el resto en cero).
+    """
+    condiciones, params = [], []
+
+    # Cada palabra por separado, en cualquier orden: alguien que busca
+    # "palio pastilla" tiene que encontrar "PASTILLA DE FRENO FIAT PALIO".
+    # Se compara sobre texto ya normalizado con LIKE (no ILIKE): ILIKE sobre
+    # la columna cruda no podría usar el índice trigram.
+    for palabra in (q or "").split():
+        condiciones.append(
+            f"({TEXTO_PRODUCTO_SQL} LIKE %s OR p.codigo_barras = %s OR {TEXTO_VEHICULOS_SQL})"
+        )
+        patron = f"%{palabra.lower()}%"
+        # El código de barras matchea EXACTO, nunca por parecido: es lo que
+        # dispara la pistola y un match aproximado sería cargar el producto
+        # equivocado en la venta.
+        params += [patron, palabra, patron]
+
+    if categoria and "categoria" not in excluir:
+        condiciones.append("p.categoria = %s")
+        params.append(categoria)
+    if subcategoria and "subcategoria" not in excluir:
+        condiciones.append("p.subcategoria = %s")
+        params.append(subcategoria)
+    if marca and "marca" not in excluir:
+        condiciones.append("texto_busqueda(p.marca) = texto_busqueda(%s)")
+        params.append(marca)
+    if vehiculo_id and "vehiculo_id" not in excluir:
+        condiciones.append(
+            "EXISTS (SELECT 1 FROM producto_vehiculos pv "
+            "WHERE pv.producto_id = p.id AND pv.vehiculo_id = %s)"
+        )
+        params.append(vehiculo_id)
+    if solo_con_stock:
+        condiciones.append("p.stock_actual > 0")
+
+    return condiciones, params
+
+
+def buscar_productos(conn, q=None, categoria=None, subcategoria=None, marca=None,
+                     vehiculo_id=None, solo_con_stock=False, limite=None):
+    """Punto único de búsqueda de productos del sistema.
+
+    Antes este criterio estaba escrito tres veces (la pantalla de Stock, el
+    JSON del buscador tipo autocompletar y el catálogo de la tienda) y ya
+    habían divergido entre sí. Cualquier pantalla que busque productos llama
+    acá: si no, vuelve a haber una pantalla que busca mejor que otra.
+    """
+    condiciones, params = _condiciones_busqueda(
+        q, categoria, subcategoria, marca, vehiculo_id, solo_con_stock
+    )
+    consulta = "SELECT p.* FROM productos p"
+    if condiciones:
+        consulta += " WHERE " + " AND ".join(condiciones)
+    consulta += " ORDER BY p.categoria, p.nombre"
+    if limite:
+        consulta += " LIMIT %s"
+        params = params + [limite]
+    return conn.execute(consulta, params).fetchall()
+
+
 def obtener_cotizaciones_producto(conn, producto_id):
     """Cotizaciones de proveedores activos para un producto, de menor a
     mayor precio_costo. Es la fuente única del criterio de "mejor precio"
