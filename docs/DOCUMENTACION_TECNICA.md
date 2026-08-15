@@ -162,10 +162,18 @@ define el esquema ni lo migra — eso vive en `supabase/migrations/` (ver
   una consulta llega a su quinta ejecución — un bug tardío e intermitente,
   difícil de relacionar con la causa.
 - Helpers de consulta (`obtener_categorias()`, `obtener_subcategorias()`,
-  `obtener_cotizaciones_producto()`, `obtener_mejor_precio_por_producto()`)
-  y de siembra de datos de ejemplo (`seed_demo_data()`, que sigue
-  llamándose una vez al arrancar `core/app.py` y no hace nada si la base
-  ya tiene productos cargados).
+  `obtener_vehiculos()`, `obtener_cotizaciones_producto()`,
+  `obtener_mejor_precio_por_producto()`) y de siembra de datos de ejemplo
+  (`seed_demo_data()`, que sigue llamándose una vez al arrancar
+  `core/app.py` y no hace nada si la base ya tiene productos cargados).
+- `buscar_productos()` / `facetas_productos()` / `sugerencias_busqueda()`:
+  el punto único de búsqueda de productos del sistema (antes estaba
+  repetido y ya divergido en tres lugares). Compara todo sobre
+  `texto_busqueda()`, una función SQL `IMMUTABLE` que saca mayúsculas,
+  acentos y espacios de más — ver la sección "Buscador de productos con
+  filtros" de `CLAUDE.md` para el detalle completo, incluidos dos gotchas
+  ya vividos ahí (normalizar de un solo lado de la comparación, y que un
+  `EXPLAIN` aislado no prueba que la consulta real use el índice).
 - Las listas de referencia (`CATEGORIAS_INICIALES`, `SUBCATEGORIAS_INICIALES`,
   etc.) que también usa `scripts/importar_datos.py` para validar — el dato
   de siembra real ahora vive en la migración de Supabase, esto queda de
@@ -267,6 +275,9 @@ si se va a tocar este esquema: las columnas de plata son `NUMERIC(12,2)`
 | `subcategorias` | Subcategorías, cada una atada a una única categoría padre (`categoria_id` FK) — jerarquía estricta, editables desde `/categorias` |
 | `productos` | Catálogo: precio costo/venta, stock actual/mínimo, categoría, subcategoría (texto libre, no FK — igual que categoría), proveedor, imagen, código de barras |
 | `producto_proveedor` | Cotización de un producto por proveedor (para el comparador de precios) |
+| `marcas` | Marcas de repuesto ya usadas (se autocompletan solas al guardar un producto, sin pantalla de administración ni columna `activo` — ver CLAUDE.md) |
+| `vehiculos` | Autos compatibles (marca, modelo, motor — `motor` obligatorio, con `activo` y pantalla propia `/vehiculos`) |
+| `producto_vehiculos` | Qué productos sirven para qué autos (N a N) |
 | `ventas` / `venta_items` | Una venta (local o tienda online) y sus líneas. Incluye los campos de facturación electrónica (`cae`, `cae_vencimiento`, `tipo_comprobante`, `imp_neto`, `imp_iva`, etc.) |
 | `compras` / `compra_items` | Una compra a un proveedor y sus líneas — repone stock y actualiza costo |
 | `pedidos_web` / `pedido_web_items` | Carrito "en tránsito" de la tienda online mientras se espera la confirmación del pago (no es un segundo inventario, ver §1) |
@@ -337,7 +348,7 @@ arranque en frío: como la condición de siembra es "la base está vacía"
 sembrado datos de mentira a la base del negocio.
 
 `DATABASE_URL` (ver §7) apunta a ese Postgres local por default
-(`postgresql://postgres:postgres@127.0.0.1:54322/postgres`); no hace falta
+(`postgresql://postgres:postgres@127.0.0.1:54422/postgres`); no hace falta
 definirla a mano salvo que se levante en otro puerto o se apunte a otra
 base.
 

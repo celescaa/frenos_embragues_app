@@ -1181,6 +1181,230 @@ cuenta corriente dan lo esperado, `aplicar_promociones()` descuenta bien tanto
 la general como la puntual (y no toca los productos fuera de alcance), y la
 suite completa (183 tests) pasa.
 
+## Buscador de productos con filtros (fases 1 y 2, 14/08/2026)
+
+Celes compartió capturas del buscador de un distribuidor mayorista
+(**Lupa**, `lupa.distrisuper.com`) porque a su hermano le resulta cómodo
+para buscar repuestos. De ahí salió el pedido: filtrar `/productos` por
+rubro, subrubro, marca y auto compatible, con una búsqueda de texto que
+aguante mayúsculas, acentos, orden de palabras y errores de tipeo —
+textual: *"tiene que ser a prueba de nabo esto, gente que no usa programas
+y les cuesta"*. Se descartó explícitamente el diseño de Lupa con grilla de
+fotos ("no me gusta el diseño"); acá son controles Bootstrap comunes.
+Spec completa: `docs/superpowers/specs/2026-08-14-buscador-productos-filtros-design.md`.
+Plan de esta entrega (fases 1 y 2 nomás; 3 a 6 quedan para después, ver más
+abajo): `docs/superpowers/plans/2026-08-14-buscador-productos-fases-1-2.md`.
+
+### Modelo de datos: tres tablas nuevas
+
+- **`marcas(id, nombre)`**: sólo alimenta el desplegable de sugerencias
+  (`<datalist>`) de la ficha de producto y, indirectamente, la
+  normalización de marcas ya cargadas. **No tiene columna `activo` ni
+  pantalla de administración propia, a propósito**: `productos.marca` sigue
+  siendo texto libre (mismo patrón que `categorias`/`subcategorias`, tabla
+  para administrar + columna denormalizada en `productos`), y la marca
+  escrita en la ficha se agrega sola a esta tabla al guardar el producto
+  (`sembrar_marcas_desde_productos()`, función SQL idempotente que agrupa
+  por `texto_busqueda(nombre)` para no duplicar `COBREQ`/`Cobreq`/`cobreq`
+  como tres marcas distintas). Como nada la administra a mano, tampoco hay
+  manera de que quede una marca vieja sin productos estorbando: **el
+  desplegable del filtro de `/productos` no sale de esta tabla, sale de
+  `facetas_productos()["marca"]`** (agrupado sobre los productos que hay
+  *ahora*), así que una marca deja de aparecer ahí sola cuando ningún
+  producto la usa más. Ver el bug de esto mismo más abajo.
+- **`vehiculos(id, marca_auto, modelo, motor, anio_desde, anio_hasta,
+  activo)`**: a diferencia de la marca, un auto no se puede denormalizar en
+  texto libre porque un producto sirve para varios autos a la vez — hace
+  falta la tabla intermedia `producto_vehiculos`. Por eso **sí tiene
+  pantalla propia** (`/vehiculos`, link en el menú Stock) con el mismo
+  patrón activo/inactivo que proveedores y categorías: no se borra un auto
+  con productos vinculados (`ON DELETE` sin `CASCADE` de ese lado, a
+  propósito — falla y se avisa, igual que un proveedor con compras), se
+  desactiva.
+  - **`motor` es `NOT NULL`, con el valor explícito `"Todos los motores"`**
+    para el repuesto que sirve para cualquier motor de ese auto. Se decidió
+    así y no dejándolo vacío porque un campo vacío obliga a decidir en cada
+    consulta si "vacío" significa "no sé" o "cualquiera" — ambigüedad que
+    un valor explícito no tiene. La alternativa de cargar cada motor del
+    mismo auto por separado multiplicaría la carga manual sin necesidad.
+  - `anio_desde`/`anio_hasta` se guardan pero **no filtran nada todavía**
+    (quedan las columnas para no tener que recargar los autos el día que se
+    sume ese filtro).
+- **`producto_vehiculos(id, producto_id, vehiculo_id)`**: tabla puente. Acá
+  sí `ON DELETE CASCADE` del lado de `producto_id` — borrar un producto se
+  lleva sus vínculos.
+
+### `db.buscar_productos()` — punto único de búsqueda
+
+Antes de esta entrega el criterio de "buscar un producto" estaba escrito
+tres veces (`/productos`, el JSON del buscador tipo autocompletar de Nueva
+venta/compra, y el catálogo de la tienda) y ya habían divergido entre sí.
+`db.buscar_productos(conn, q, categoria, subcategoria, marca, vehiculo_id,
+solo_con_stock, limite)` en `core/database.py` es ahora el único lugar
+donde vive ese criterio, junto con su hermana `db.facetas_productos(conn,
+...)` (cuenta cuántos productos quedarían en cada opción de cada filtro,
+**sin aplicarse a sí misma** — si al elegir Frenos el contador de
+Embragues cayera a 0, no se podría ver que existe esa otra opción). Por
+ahora sólo `/productos` las llama (fase 2); Nueva venta, la tienda y el
+resto quedan para las fases siguientes, ver el final de esta sección.
+
+Los cuatro requisitos de "a prueba de nabo" viven **adentro** de
+`buscar_productos()`, no repetidos en cada pantalla:
+
+1. **No distingue mayúsculas ni acentos**: todo se compara sobre
+   `texto_busqueda(...)`, una función SQL (`unaccent` + `lower` +
+   `regexp_replace` de espacios) marcada `IMMUTABLE` para poder indexarla.
+2. **No importa el orden de las palabras**: lo tipeado se parte por
+   espacio y **cada palabra** tiene que aparecer en algún campo del
+   producto (nombre, código, marca, `modelo_compatible`) o en el auto
+   vinculado, en cualquier orden — así "palio pastilla" encuentra
+   "PASTILLA DE FRENO FIAT PALIO".
+3. **Aguanta un error de tipeo**: si la búsqueda no devuelve nada,
+   `db.sugerencias_busqueda()` ofrece nombres parecidos con
+   `word_similarity()` de `pg_trgm` (no `similarity()`: compara la palabra
+   tipeada contra el mejor tramo del nombre completo, no contra el nombre
+   entero, que diluye el parecido de una palabra sola). Es una sugerencia
+   con link, nunca un reemplazo automático.
+4. **Los espacios de más no molestan**: los normaliza la misma
+   `texto_busqueda()`.
+
+El código de barras sigue matcheando **exacto**, nunca por parecido: es lo
+que dispara el escaneo con la pistola, y un match aproximado ahí sería
+cargar el producto equivocado en la venta.
+
+`productos.modelo_compatible` **no se tocó ni se borró** y sigue siendo
+texto libre: la búsqueda lo sigue mirando (requisito 2 de arriba), así que
+nada de lo ya cargado antes de esta entrega dejó de encontrarse. El filtro
+estructurado por auto (`vehiculo_id`) sólo encuentra lo que esté vinculado
+en `producto_vehiculos` — mientras esa tabla esté poco cargada (arranca
+vacía, se llena a mano desde la ficha de cada producto), ese filtro
+puntual va a devolver poco, pero el sistema nunca empeora respecto de
+antes porque el texto libre sigue funcionando igual que siempre.
+
+### Gotcha: normalizar de un solo lado no alcanza
+
+Primera versión de `_condiciones_busqueda()` normalizaba la palabra
+tipeada con `.lower()` de Python antes de mandarla al SQL, y comparaba
+contra `texto_busqueda(columna)` del lado de la base. `.lower()` saca
+mayúsculas pero **no saca acentos**; `texto_busqueda()` sí. Resultado:
+escribir "hidráulico" (con acento, como lo escribe la mayoría) no
+encontraba "HIDRÁULICO" porque los dos lados de la comparación quedaban
+normalizados distinto. Arreglo: normalizar los dos lados **en SQL**,
+pasando la palabra cruda como parámetro y envolviéndola en
+`texto_busqueda(%s)` también del lado de la consulta (ver
+`_condiciones_busqueda()` en `core/database.py`). Este mismo error existía
+también en JavaScript, en el buscador de autos vinculados de la ficha de
+producto (`templates/producto_form.html`): `data-texto` con `|lower` de
+Jinja y el filtro con `.toLowerCase()` de JS, ninguno de los dos saca
+acentos, así que escribir "citroen" no encontraba "Citroën". Se arregló
+normalizando los dos lados de esa comparación también con
+`.normalize('NFD').replace(...)` antes de compararlos.
+
+### Gotcha: un `EXPLAIN` aislado no prueba que la consulta real use el índice
+
+La migración crea `productos_texto_trgm`, un índice trigram sobre la misma
+expresión que arma `TEXTO_PRODUCTO_SQL`. Probar esa expresión sola con
+`EXPLAIN` muestra el índice en el plan — pero la consulta real de
+`buscar_productos()` no es esa expresión sola: es
+`(TEXTO_PRODUCTO_SQL LIKE ... OR p.codigo_barras = ... OR EXISTS (...))`,
+y **un `OR` con un `EXISTS` no es indexable**. Medido con 3.000 productos:
+`Seq Scan`, 32ms, el índice nunca aparece en el plan de la consulta real.
+El índice sigue sirviendo para `marcas_nombre_normalizado`. Si algún día
+hace falta que la búsqueda de texto lo use, hay que sacar el `EXISTS` del
+`OR`: resolver los ids que matchean por auto vinculado en una consulta
+aparte y meterlos como `p.id = ANY(%s)`. No se hizo en esta entrega — el
+catálogo real ronda los 6.000 productos, no los millones donde un
+`Seq Scan` se vuelve un problema real — pero quedó anotado para no
+repetir la confusión de "el comentario dice que el índice se usa, entonces
+algo más anda mal" el día que sí haga falta.
+
+### La pantalla de Stock (`/productos`)
+
+Barra de filtros (Rubro → Subrubro en cascada, Marca, Auto, "Sólo con
+stock", buscador de texto) que **aplica sola** al cambiar cualquier
+control — sin botón "Filtrar" — y queda en la URL
+(`?categoria=Frenos&marca=Cobreq`), así el botón "atrás" del navegador
+funciona y la búsqueda se puede guardar en favoritos. Cada opción muestra
+su contador (`Frenos (128)`) calculado con `facetas_productos()`. Tope de
+200 resultados dibujados (`LIMITE_RESULTADOS` en `core/app.py`) con el
+aviso real "Mostrando 200 de 1.340" — con el catálogo completo, dibujar la
+tabla entera cuelga el navegador.
+
+Los filtros activos se ven como etiquetas con una X para sacarlos de a
+uno (filtro `reject_key` de Jinja, en `core/app.py`, arma la misma URL
+sin ese parámetro) más "Limpiar todo". **La X del rubro saca también el
+subrubro**: un subrubro sin su rubro no es un estado que tenga sentido —
+si quedara solo, el JS repuebla el desplegable de subrubro vacío (sin
+rubro elegido) y el siguiente envío del formulario lo borraría en
+silencio. `reject_key` acepta varias claves por eso (`reject_key('categoria',
+'subcategoria')` para esa X puntual).
+
+El mensaje de "no hay nada para mostrar" distingue dos casos, no uno solo:
+con la base vacía y sin ningún filtro dice "No hay productos cargados
+todavía"; con algún filtro puesto que no cruzó con nada dice "Ningún
+producto coincide con los filtros aplicados" (con link para limpiarlos) —
+decirle a alguien que no usa programas que "no hay productos cargados"
+cuando en realidad hay 6.000 y el filtro fue el que no encontró nada es
+justo el tipo de confusión que este trabajo vino a evitar. Ese mensaje
+tampoco aparece junto al alert de "¿Quisiste decir...?": mostrar los dos
+al mismo tiempo se contradice.
+
+El buscador de texto espera **800ms** sin tipear antes de recargar la
+página (no 400: una pausa de más de 400ms en el medio de "pastilla palio"
+—nada raro para quien no usa programas— recargaba a mitad de palabra,
+sacaba el foco del campo, y lo que seguía tecleando no entraba en ningún
+lado, como si el teclado hubiera dejado de andar). Al recargar por una
+búsqueda de texto, el campo recupera el foco y el cursor al final de lo ya
+escrito.
+
+**Bug encontrado en la revisión final de esta rama, corregido antes de
+mergear**: `facetas_productos()` agrupaba la dimensión `marca` por la
+columna `p.marca` cruda, pero el filtro de marca comparaba normalizado
+(`texto_busqueda(p.marca) = texto_busqueda(%s)`). El catálogo real sale de
+listas de precios de proveedores con la marca escrita distinto
+(`COBREQ`/`Cobreq`/`cobreq`), así que el desplegable mostraba la misma
+marca tres veces, cada una con su propio contador de 1, aunque elegir
+cualquiera de las tres devolvía los tres productos igual. Se arregló
+agrupando también por `texto_busqueda(p.marca)` (con `min(btrim(p.marca))`
+como nombre de display) y, de paso, cambiando la fuente del desplegable de
+`SELECT nombre FROM marcas` a `facetas_productos()["marca"]` — así el
+filtro nunca puede mostrar una marca que ningún producto use, sin
+necesitar una pantalla de administración que la borre.
+
+### Vincular autos y sugerir marca desde la ficha del producto
+
+`producto_form.html` suma una sección opcional "Autos compatibles"
+(checkboxes con buscador de texto en vivo, mismo patrón de filtrado en
+vivo del resto del sistema) que reemplaza los vínculos del producto al
+guardar (`guardar_vehiculos_producto()` en `core/app.py`, borra e
+reinserta en vez de calcular la diferencia). El campo `marca` sigue siendo
+texto libre pero con un `<datalist>` de las ya cargadas. **Ningún campo de
+esta sección lleva `required`**: es exactamente el bug ya documentado más
+arriba en "Estado actual" (13/08/2026) que dejó esta misma pantalla sin
+poder guardarse — una sección opcional con `required` bloquea el envío del
+formulario sin ningún error visible, porque la validación nativa de HTML5
+corre antes del evento `submit`.
+
+### Qué queda pendiente
+
+Fases 3 a 6 de la spec, con su propio plan cuando el hermano de Celes haya
+probado esta entrega:
+
+- **Fase 3** — los mismos filtros en Nueva venta, vía un endpoint nuevo
+  `/api/buscar-productos` (reemplaza el JSON con todos los productos
+  embebido en el HTML, pesado con el catálogo real).
+- **Fase 4** — los mismos filtros en el catálogo de la tienda online.
+- **Fase 5** — `scripts/detectar_vehiculos.py`: propone autos leyendo la
+  descripción ya cargada de cada producto, con planilla de revisión
+  humana antes de aplicar nada (mismo criterio que
+  `matchear_productos_proveedores.py`).
+- **Fase 6** — grupos de equivalencia entre marcas del mismo repuesto
+  (el negocio llega a tener el mismo buje en Cobreq y en VTH a la vez),
+  con `scripts/proponer_equivalencias.py` proponiendo y una persona
+  confirmando — nunca automático, porque descripciones casi idénticas
+  ("BUJE PARRILLA DELANTERA" vs "BUJE PARRILLA TRASERA") agrupadas mal
+  mandan al cliente a casa con la pieza equivocada.
+
 ## Estructura
 
 ```
