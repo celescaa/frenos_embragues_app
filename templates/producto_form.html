@@ -114,6 +114,7 @@
                      id="auto{{ v.id }}" {{ 'checked' if v.id in vehiculos_del_producto }}>
               <label class="form-check-label" for="auto{{ v.id }}">
                 {{ v.marca_auto }} {{ v.modelo }} <span class="text-muted">{{ v.motor }}</span>
+                {% if not v.activo %}<span class="badge bg-secondary ms-1">desactivado</span>{% endif %}
               </label>
             </div>
           {% endfor %}

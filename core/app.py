@@ -1157,13 +1157,23 @@ def productos_editar(producto_id):
         del_producto = subcategorias_json.setdefault(producto["categoria"], [])
         if producto["subcategoria"] not in del_producto:
             del_producto.append(producto["subcategoria"])
-    vehiculos = db.obtener_vehiculos(conn)
     vehiculos_del_producto = [
         f["vehiculo_id"] for f in conn.execute(
             "SELECT vehiculo_id FROM producto_vehiculos WHERE producto_id = %s",
             (producto_id,),
         ).fetchall()
     ]
+    # incluye también los autos ya vinculados a este producto aunque estén
+    # desactivados, para no perder el vínculo de la ficha si se desactivaron
+    # después (mismo criterio que con proveedor/categoría más arriba). Sin
+    # esto, guardar cualquier cambio del producto —el precio, el stock, lo
+    # que sea— borraba en silencio el vínculo con un auto ya desactivado,
+    # porque guardar_vehiculos_producto() reemplaza todo por lo tildado y un
+    # auto que no aparece en la lista no puede llegar tildado.
+    vehiculos = conn.execute(
+        "SELECT * FROM vehiculos WHERE activo = true OR id = ANY(%s) ORDER BY marca_auto, modelo, motor",
+        (vehiculos_del_producto,),
+    ).fetchall()
     marcas = [m["nombre"] for m in conn.execute("SELECT nombre FROM marcas ORDER BY nombre")]
     conn.close()
     return render_template(

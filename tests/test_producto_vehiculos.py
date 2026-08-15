@@ -1,5 +1,7 @@
 """Vincular autos a un producto desde su ficha, y que la marca escrita quede
 disponible para el filtro sin pantalla de administración de por medio."""
+import re
+
 import pytest
 from core.app import app as flask_app
 
@@ -88,3 +90,63 @@ def test_la_marca_no_se_duplica_por_mayusculas(client, db_conn, autos):
     }, follow_redirects=True)
     total = db_conn.execute("SELECT count(*) AS n FROM marcas").fetchone()["n"]
     assert total == 1
+
+
+def test_editar_no_pierde_un_auto_ya_vinculado_si_se_desactivo_despues(client, db_conn, autos):
+    """Bug encontrado en revisión: si un auto vinculado a un producto se
+    desactiva después desde /vehiculos, dejaba de aparecer en la ficha del
+    producto. Y como guardar_vehiculos_producto() reemplaza todo por lo
+    tildado, guardar cualquier otro cambio del producto (acá, el precio)
+    borraba el vínculo en silencio -- sin que el usuario tocara los autos.
+
+    La ficha tiene que seguir mostrando (tildado) un auto ya vinculado aunque
+    esté desactivado, para que un envío normal del formulario -- que
+    reenvía lo que ya estaba tildado -- no lo pierda."""
+    client.post("/productos/nuevo", data={
+        **DATOS_BASE, "vehiculo_id": [str(autos["palio"])],
+    }, follow_redirects=True)
+    producto_id = db_conn.execute("SELECT id FROM productos").fetchone()["id"]
+
+    db_conn.execute("UPDATE vehiculos SET activo = false WHERE id = %s", (autos["palio"],))
+    db_conn.commit()
+
+    # Lo que un usuario real vería al reabrir la ficha, y lo que su navegador
+    # volvería a mandar si no toca la sección de autos: los checkboxes que la
+    # ficha ya renderiza tildados.
+    html = client.get(f"/productos/{producto_id}/editar").data.decode()
+    tildados = [
+        m.group(1) for m in re.finditer(r'name="vehiculo_id" value="(\d+)"[^>]*>', html)
+        if "checked" in m.group(0)
+    ]
+    assert str(autos["palio"]) in tildados, "el auto desactivado ya no aparece tildado en la ficha"
+
+    client.post(f"/productos/{producto_id}/editar", data={
+        **DATOS_BASE, "precio_venta": "150", "vehiculo_id": tildados,
+    }, follow_redirects=True)
+
+    vinculados = db_conn.execute(
+        "SELECT vehiculo_id FROM producto_vehiculos WHERE producto_id = %s", (producto_id,)
+    ).fetchall()
+    assert [f["vehiculo_id"] for f in vinculados] == [autos["palio"]]
+
+
+def test_editar_no_toca_los_vinculos_de_otro_producto(client, db_conn, autos):
+    """guardar_vehiculos_producto() borra y reinserta -- tiene que hacerlo
+    acotado al producto que se está editando, no a todos."""
+    client.post("/productos/nuevo", data={
+        **DATOS_BASE, "vehiculo_id": [str(autos["palio"])],
+    }, follow_redirects=True)
+    client.post("/productos/nuevo", data={
+        **DATOS_BASE, "nombre": "Otra pastilla", "vehiculo_id": [str(autos["gol"])],
+    }, follow_redirects=True)
+    productos = db_conn.execute("SELECT id FROM productos ORDER BY id").fetchall()
+    id_1, id_2 = productos[0]["id"], productos[1]["id"]
+
+    client.post(f"/productos/{id_1}/editar", data={
+        **DATOS_BASE, "precio_venta": "999", "vehiculo_id": [str(autos["palio"])],
+    }, follow_redirects=True)
+
+    vinculos_2 = db_conn.execute(
+        "SELECT vehiculo_id FROM producto_vehiculos WHERE producto_id = %s", (id_2,)
+    ).fetchall()
+    assert [f["vehiculo_id"] for f in vinculos_2] == [autos["gol"]]
