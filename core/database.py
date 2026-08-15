@@ -181,7 +181,7 @@ TEXTO_PRODUCTO_SQL = """texto_busqueda(
 TEXTO_VEHICULOS_SQL = """EXISTS (
     SELECT 1 FROM producto_vehiculos pv JOIN vehiculos v ON v.id = pv.vehiculo_id
     WHERE pv.producto_id = p.id
-      AND texto_busqueda(v.marca_auto || ' ' || v.modelo) LIKE %s
+      AND texto_busqueda(v.marca_auto || ' ' || v.modelo) LIKE '%%' || texto_busqueda(%s) || '%%'
 )"""
 
 
@@ -199,16 +199,21 @@ def _condiciones_busqueda(q=None, categoria=None, subcategoria=None, marca=None,
     # Cada palabra por separado, en cualquier orden: alguien que busca
     # "palio pastilla" tiene que encontrar "PASTILLA DE FRENO FIAT PALIO".
     # Se compara sobre texto ya normalizado con LIKE (no ILIKE): ILIKE sobre
-    # la columna cruda no podría usar el índice trigram.
+    # la columna cruda no podría usar el índice trigram. El patrón se arma
+    # en SQL con texto_busqueda(%s), no en Python: normalizar la palabra con
+    # .lower() de este lado saca las mayúsculas pero no los acentos, y
+    # texto_busqueda() sí los saca, así que los dos lados quedaban
+    # normalizados distinto y buscar escribiendo el acento no encontraba
+    # nada.
     for palabra in (q or "").split():
         condiciones.append(
-            f"({TEXTO_PRODUCTO_SQL} LIKE %s OR p.codigo_barras = %s OR {TEXTO_VEHICULOS_SQL})"
+            f"({TEXTO_PRODUCTO_SQL} LIKE '%%' || texto_busqueda(%s) || '%%' "
+            f"OR p.codigo_barras = %s OR {TEXTO_VEHICULOS_SQL})"
         )
-        patron = f"%{palabra.lower()}%"
         # El código de barras matchea EXACTO, nunca por parecido: es lo que
         # dispara la pistola y un match aproximado sería cargar el producto
         # equivocado en la venta.
-        params += [patron, palabra, patron]
+        params += [palabra, palabra, palabra]
 
     if categoria and "categoria" not in excluir:
         condiciones.append("p.categoria = %s")

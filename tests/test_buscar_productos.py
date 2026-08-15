@@ -47,6 +47,20 @@ def test_no_distingue_acentos(db_conn, catalogo):
     )
 
 
+def test_no_distingue_acentos_en_la_otra_direccion_tambien(db_conn, catalogo):
+    """Simetría: si 'hidraulico' (sin tildar) encuentra 'hidráulico', también
+    tiene que encontrarlo escribiendo el acento tal cual, y da igual si
+    encima va en mayúsculas. Antes solo se probaba la dirección sin acento
+    (que ya andaba), así que un bug de normalización asimétrica pasaba
+    limpio: .lower() en Python saca mayúsculas pero no acentos, mientras que
+    texto_busqueda() en SQL sí los saca, y comparar un lado normalizado
+    distinto del otro dejaba sin resultados a cualquiera que sí tildara."""
+    for texto in ["hidráulico", "HIDRÁULICO", "líquido"]:
+        assert "Líquido de freno hidráulico" in nombres(
+            db.buscar_productos(db_conn, q=texto)
+        ), f"falló con '{texto}'"
+
+
 def test_no_importa_el_orden_de_las_palabras(db_conn, catalogo):
     """El caso del mostrador: el cliente dice el auto primero."""
     assert nombres(db.buscar_productos(db_conn, q="palio pastilla")) == [
