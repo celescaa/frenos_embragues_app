@@ -21,9 +21,14 @@ import psycopg
 from psycopg.rows import dict_row
 from core import database as db
 
+# Puerto 54422, no el 54322 que la CLI de Supabase usa por defecto: ese default
+# es el mismo para CUALQUIER proyecto, así que dos proyectos locales de la misma
+# persona se pelean por él. Ya pasó dos veces (con `hogar-gestion`), y la segunda
+# dejó a este proyecto sin base en el medio de una corrida. Los puertos de este
+# proyecto están corridos +100 en supabase/config.toml para que puedan convivir.
 PG_URL_TEST = os.environ.get(
     "DATABASE_URL_TEST",
-    "postgresql://postgres:postgres@127.0.0.1:54322/postgres",
+    "postgresql://postgres:postgres@127.0.0.1:54422/postgres",
 )
 
 # Las 21 tablas de datos del esquema (ver supabase/migrations/), en cualquier
@@ -46,14 +51,17 @@ def pytest_configure(config):
     abre la conexión y siembra datos de ejemplo en tiempo de importación. Un
     fixture llegaría tarde.
 
-    El chequeo no es paranoia: 54322 es el puerto default de la CLI de Supabase
-    para cualquier proyecto, así que si hay otro proyecto local levantado (pasó
-    el 13/08/2026 con `hogar-gestion`) la suite apunta sin avisar a la base de
-    ese otro proyecto. Y `_limpiar_base_de_pruebas` hace TRUNCATE de una lista
-    fija de tablas: contra la base equivocada, eso es borrar datos ajenos. Hoy
-    zafaría de casualidad —el TRUNCATE es una sola sentencia y aborta entera si
-    alguna tabla no existe—, pero eso depende de que los esquemas no se
-    parezcan. Mejor fallar acá, con un mensaje que diga qué pasó.
+    El chequeo no es paranoia. Este proyecto ya no usa el puerto default de la
+    CLI (ver el comentario de PG_URL_TEST arriba), justamente porque otro
+    proyecto local se lo apropió dos veces —`hogar-gestion`, el 13/08/2026 y de
+    nuevo el 14—, la segunda vez en el medio de una corrida. Correr los puertos
+    baja mucho la probabilidad de que vuelva a pasar, pero no la elimina: basta
+    con que alguien apunte `DATABASE_URL_TEST` a otro lado. Y
+    `_limpiar_base_de_pruebas` hace TRUNCATE de una lista fija de tablas: contra
+    la base equivocada, eso es borrar datos ajenos. Zafaría de casualidad —el
+    TRUNCATE es una sola sentencia y aborta entera si alguna tabla no existe—,
+    pero eso depende de que los esquemas no se parezcan. Mejor fallar acá, con
+    un mensaje que diga qué pasó.
     """
     try:
         conn = psycopg.connect(PG_URL_TEST, row_factory=dict_row)
@@ -76,7 +84,7 @@ def pytest_configure(config):
             f"{len(faltantes)} de las {len(TABLAS)} tablas del esquema (por "
             f"ejemplo {', '.join(faltantes[:3])}).\n"
             "Suele pasar cuando otro proyecto de Supabase quedó levantado y se "
-            "adueñó del puerto. Fijate con `docker ps` quién tiene el 54322, "
+            "adueñó del puerto. Fijate con `docker ps` quién tiene el 54422, "
             "levantá el Postgres de este proyecto con `npx supabase start`, o "
             "apuntá la suite a otra base con DATABASE_URL_TEST.",
             returncode=1,
@@ -92,7 +100,7 @@ def pg_url():
 # valores por defecto de la CLI: son idénticas en cualquier máquina, no dan
 # acceso a nada real y no son un secreto. Quedan overrideables por si alguien
 # corre la suite contra otra instancia.
-SUPABASE_URL_TEST = os.environ.get("SUPABASE_URL_TEST", "http://127.0.0.1:54321")
+SUPABASE_URL_TEST = os.environ.get("SUPABASE_URL_TEST", "http://127.0.0.1:54421")
 SUPABASE_ANON_KEY_TEST = os.environ.get(
     "SUPABASE_ANON_KEY_TEST", "sb_publishable_ACJWlzQHlZjBrEguHvfOxg_3BJgxAaH"
 )

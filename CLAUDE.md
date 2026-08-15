@@ -872,7 +872,7 @@ Qué cambió, para quien conocía el sistema por su versión en SQLite:
 1. `npx supabase start` — levanta Postgres (y el resto de los servicios de
    Supabase) en contenedores Docker locales. Imprime la cadena de conexión;
    por default queda en
-   `postgresql://postgres:postgres@127.0.0.1:54322/postgres`, que es el
+   `postgresql://postgres:postgres@127.0.0.1:54422/postgres`, que es el
    default que ya trae `core/database.py` si no se define `DATABASE_URL`.
    `npx supabase stop` la apaga; `npx supabase db reset` vuelve a aplicar
    todas las migraciones de `supabase/migrations/` desde cero (borra los
@@ -919,7 +919,7 @@ python -m pytest tests/ -v
 ```
 
 Por default apunta al mismo Postgres local de arriba
-(`postgresql://postgres:postgres@127.0.0.1:54322/postgres`); se puede
+(`postgresql://postgres:postgres@127.0.0.1:54422/postgres`); se puede
 apuntar a otra base con la variable `DATABASE_URL_TEST`. `tests/test_rutas.py`
 es la red de seguridad más amplia: recorre las rutas GET principales del
 sistema (logueado y sin loguear) y solo verifica que ninguna devuelva un
