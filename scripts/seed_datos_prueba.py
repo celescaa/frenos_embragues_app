@@ -15,7 +15,13 @@ Las dos partes están separadas a propósito:
 Uso (siempre desde la raíz del proyecto, no desde adentro de scripts/):
     python scripts/seed_datos_prueba.py                 # proveedores reales + datos de prueba
     python scripts/seed_datos_prueba.py --solo-proveedores
+    python scripts/seed_datos_prueba.py --solo-autos    # sólo los autos, sin borrar nada
     python scripts/seed_datos_prueba.py --reemplazar    # borra los datos y vuelve a sembrar
+
+`--solo-autos` es el único que se puede correr sobre una base con datos ya
+cargados sin riesgo: es puramente aditivo e idempotente. Sirve para una base
+sembrada con una versión de este script anterior a los autos, donde el filtro
+"Auto" de /productos queda vacío.
 
 Sin `--reemplazar` es seguro correrlo más de una vez: los proveedores se
 actualizan en vez de duplicarse, y los datos de prueba se saltean si ya hay
@@ -393,29 +399,73 @@ def _sembrar_productos(conn, proveedores):
 def _sembrar_vehiculos(conn, productos):
     """Carga los autos y los vincula a los productos que les sirven.
 
-    Devuelve la cantidad de vínculos creados. La clave del diccionario de
-    autos es "marca modelo" (sin el motor), que es como los nombra
+    Devuelve (autos, vínculos). La clave del diccionario de autos es
+    "marca modelo" (sin el motor), que es como los nombra
     VEHICULOS_POR_PRODUCTO: en este catálogo de prueba no hay dos motores
     distintos del mismo auto, así que alcanza para identificarlo.
+
+    Es idempotente y no borra nada, para poder correrlo sobre una base que ya
+    tiene datos (que es el caso de `--solo-autos`): el auto que ya existe se
+    reusa y el vínculo repetido se ignora.
+
+    `productos` puede venir de la siembra recién hecha o de la base. Un código
+    que no esté cargado se saltea en silencio: sobre una base sembrada con una
+    versión anterior del script no están todos los productos de PRODUCTOS, y
+    frenar por eso dejaría sin vincular a los que sí están.
     """
     autos = {}
     for marca_auto, modelo, motor, desde, hasta in VEHICULOS:
-        fila = conn.execute(
+        conn.execute(
             """INSERT INTO vehiculos (marca_auto, modelo, motor, anio_desde, anio_hasta)
-               VALUES (%s, %s, %s, %s, %s) RETURNING id""",
+               VALUES (%s, %s, %s, %s, %s)
+               ON CONFLICT (marca_auto, modelo, motor) DO NOTHING""",
             (marca_auto, modelo, motor, desde, hasta),
+        )
+        fila = conn.execute(
+            "SELECT id FROM vehiculos WHERE marca_auto=%s AND modelo=%s AND motor=%s",
+            (marca_auto, modelo, motor),
         ).fetchone()
         autos[f"{marca_auto} {modelo}"] = fila["id"]
 
     vinculos = 0
     for codigo, nombres in VEHICULOS_POR_PRODUCTO.items():
+        if codigo not in productos:
+            continue
         for nombre in nombres:
-            conn.execute(
-                "INSERT INTO producto_vehiculos (producto_id, vehiculo_id) VALUES (%s, %s)",
+            cur = conn.execute(
+                """INSERT INTO producto_vehiculos (producto_id, vehiculo_id)
+                   VALUES (%s, %s)
+                   ON CONFLICT (producto_id, vehiculo_id) DO NOTHING""",
                 (productos[codigo]["id"], autos[nombre]),
             )
-            vinculos += 1
+            vinculos += cur.rowcount
     return len(autos), vinculos
+
+
+def sembrar_solo_autos(conn):
+    """Carga los autos de ejemplo y los vincula a los productos que YA estén
+    en la base, sin tocar nada más.
+
+    Existe para una base que ya tiene datos cargados (el caso real: producción
+    quedó sembrada con una versión del script anterior a los autos, así que el
+    filtro "Auto" de /productos aparecía vacío). No borra ni modifica ningún
+    producto, cliente ni venta: sólo agrega lo que falte.
+    """
+    productos = {
+        fila["codigo"]: fila
+        for fila in conn.execute(
+            "SELECT id, codigo FROM productos WHERE codigo IS NOT NULL"
+        ).fetchall()
+    }
+    autos, vinculos = _sembrar_vehiculos(conn, productos)
+    sin_cargar = [c for c in VEHICULOS_POR_PRODUCTO if c not in productos]
+    print(f"Autos de ejemplo: {autos} autos, {vinculos} vínculos nuevos.")
+    if sin_cargar:
+        print(
+            f"  ({len(sin_cargar)} productos de la lista no están en esta base y se "
+            f"saltearon: {', '.join(sorted(sin_cargar))})"
+        )
+    return autos, vinculos
 
 
 def _sembrar_cotizaciones(conn, productos, proveedores):
@@ -792,6 +842,11 @@ def main(argv=None):
         help="carga únicamente los 13 proveedores reales, sin datos de prueba",
     )
     parser.add_argument(
+        "--solo-autos", action="store_true",
+        help="carga únicamente los autos de ejemplo y los vincula a los productos "
+             "que ya estén cargados; no borra ni modifica nada más",
+    )
+    parser.add_argument(
         "--reemplazar", action="store_true",
         help="BORRA clientes, productos, ventas, compras y todo el resto antes de sembrar",
     )
@@ -809,6 +864,13 @@ def main(argv=None):
 
     conn = db.get_connection()
     try:
+        # --solo-autos es puramente aditivo: ni siquiera toca los proveedores.
+        if args.solo_autos:
+            sembrar_solo_autos(conn)
+            conn.commit()
+            print("Listo, sobre:", db.DATABASE_URL)
+            return 0
+
         if args.reemplazar:
             borrar_datos(conn)
 

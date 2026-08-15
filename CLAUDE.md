@@ -1197,10 +1197,16 @@ concreta tenga qué mostrar.
   `vehiculos` vino a resolver. Los productos "Universal" (líquido de frenos,
   arandelas, batería) quedan sin vincular a propósito: atarlos a los 16 los
   haría aparecer en todos los filtros de auto como si fueran específicos.
-  Ojo que esto es **seed**, no migración: en producción el filtro sigue vacío
-  hasta que alguien cargue los autos desde `/vehiculos` y los vincule desde
-  la ficha de cada producto. Es dato del negocio (qué pieza sirve para qué
-  auto), no algo que se pueda inventar.
+  Ojo que esto es **seed**, no migración: no viaja solo a producción.
+  Para una base que ya tiene datos —el caso real: producción quedó sembrada
+  con una versión anterior del script, sin autos— está
+  **`--solo-autos`**, que carga los autos y los vincula a los productos que
+  ya estén cargados **sin borrar ni modificar nada más**. Es idempotente
+  (segunda corrida: 0 vínculos nuevos) y saltea en silencio los códigos de
+  producto que esa base no tenga, avisando cuáles. Probado contra una
+  simulación fiel de producción (30 productos, 0 autos, más un producto
+  cargado a mano): creó 16 autos y 34 vínculos, salteó los 6 productos
+  ausentes y dejó intacto el producto manual.
 - **`stock_actual` es el stock de HOY, ya neto del historial.** Las ventas,
   compras y cargos que siembra el script son historia y no vuelven a moverlo.
   Simular el stock inicial de cada producto para que la historia "cuadre" no
