@@ -166,6 +166,23 @@ def obtener_subcategorias(conn=None, categoria_id=None, solo_activas=True):
     return filas
 
 
+def obtener_vehiculos(conn=None, solo_activos=True):
+    """Autos cargados, para el desplegable del filtro y para vincularlos a un
+    producto. Mismo patrón que obtener_categorias(): si no se pasa una
+    conexión abierta, abre y cierra una propia."""
+    conn_propia = conn is None
+    if conn_propia:
+        conn = get_connection()
+    consulta = "SELECT * FROM vehiculos"
+    if solo_activos:
+        consulta += " WHERE activo = true"
+    consulta += " ORDER BY marca_auto, modelo, motor"
+    filas = conn.execute(consulta).fetchall()
+    if conn_propia:
+        conn.close()
+    return filas
+
+
 # Campos de `productos` sobre los que busca el texto libre, concatenados y
 # normalizados. Tiene que coincidir EXACTAMENTE con la expresión del índice
 # `productos_texto_trgm` de la migración: si difieren, el índice deja de

@@ -10,6 +10,7 @@ RUTAS_PRIVADAS = [
     "/compras/importar-factura", "/pedidos", "/ventas", "/ventas/dia",
     "/ventas/nueva", "/compras/nueva", "/stock/no-facturado",
     "/usuarios", "/clientes/nuevo", "/productos/nuevo", "/proveedores/nuevo",
+    "/vehiculos",
 ]
 
 RUTAS_PUBLICAS = ["/login", "/tienda", "/tienda/carrito"]

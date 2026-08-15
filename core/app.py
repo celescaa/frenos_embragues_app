@@ -1386,6 +1386,73 @@ def subcategorias_desactivar(subcategoria_id):
     return redirect(url_for("categorias_lista", todas=request.args.get("todas", "")))
 
 
+@app.route("/vehiculos")
+def vehiculos_lista():
+    conn = db.get_connection()
+    vehiculos = db.obtener_vehiculos(conn, solo_activos=False)
+    usos = {
+        fila["vehiculo_id"]: fila["n"]
+        for fila in conn.execute(
+            "SELECT vehiculo_id, count(*) AS n FROM producto_vehiculos GROUP BY vehiculo_id"
+        ).fetchall()
+    }
+    conn.close()
+    return render_template("vehiculos.html", vehiculos=vehiculos, usos=usos)
+
+
+@app.route("/vehiculos/nuevo", methods=["POST"])
+def vehiculos_nuevo():
+    marca_auto = request.form.get("marca_auto", "").strip()
+    modelo = request.form.get("modelo", "").strip()
+    motor = request.form.get("motor", "").strip()
+    if not (marca_auto and modelo and motor):
+        flash("Marca, modelo y motor son obligatorios.", "warning")
+        return redirect(url_for("vehiculos_lista"))
+    conn = db.get_connection()
+    try:
+        conn.execute(
+            """INSERT INTO vehiculos (marca_auto, modelo, motor, anio_desde, anio_hasta)
+               VALUES (%s, %s, %s, %s, %s)""",
+            (marca_auto, modelo, motor,
+             a_entero(request.form.get("anio_desde")),
+             a_entero(request.form.get("anio_hasta"))),
+        )
+        conn.commit()
+        flash(f"Se agregó {marca_auto} {modelo} {motor}.", "success")
+    except psycopg.errors.UniqueViolation:
+        conn.rollback()
+        flash(f"{marca_auto} {modelo} {motor} ya estaba cargado.", "warning")
+    conn.close()
+    return redirect(url_for("vehiculos_lista"))
+
+
+@app.route("/vehiculos/<int:vehiculo_id>/activar", methods=["POST"])
+def vehiculos_activar(vehiculo_id):
+    conn = db.get_connection()
+    conn.execute("UPDATE vehiculos SET activo = NOT activo WHERE id = %s", (vehiculo_id,))
+    conn.commit()
+    conn.close()
+    return redirect(url_for("vehiculos_lista"))
+
+
+@app.route("/vehiculos/<int:vehiculo_id>/eliminar", methods=["POST"])
+def vehiculos_eliminar(vehiculo_id):
+    conn = db.get_connection()
+    try:
+        conn.execute("DELETE FROM vehiculos WHERE id = %s", (vehiculo_id,))
+        conn.commit()
+        flash("Auto eliminado.", "success")
+    except psycopg.errors.ForeignKeyViolation:
+        # Mismo criterio que un proveedor con compras cargadas: se avisa con
+        # un mensaje claro y se ofrece desactivarlo, en vez de dejar escapar
+        # el error de la base.
+        conn.rollback()
+        flash("No se puede eliminar: hay productos vinculados a este auto. "
+              "Desactivalo si no querés que aparezca más.", "warning")
+    conn.close()
+    return redirect(url_for("vehiculos_lista"))
+
+
 # ---------------------------------------------------------------------------
 # Ventas
 # ---------------------------------------------------------------------------
