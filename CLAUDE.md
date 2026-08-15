@@ -1110,6 +1110,34 @@ El bucket `productos` lo crea la propia suite si falta
 (`almacenamiento.asegurar_bucket()`); en producción se crea una vez desde el
 panel.
 
+### ⚠️ Un `git push` NO migra la base de producción (vivido el 15/08/2026)
+
+Vercel despliega solo desde GitHub: apenas entra un commit a `main`, el
+**código** nuevo sale a producción. Las migraciones de `supabase/migrations/`
+**no viajan con eso** — la base de Supabase se actualiza aparte, con
+`npx supabase db push`.
+
+Pasó de verdad y tiró el sitio. Se subió la tanda del buscador con filtros y
+la taxonomía v3, Vercel desplegó el código, y producción quedó corriendo
+código que llamaba a `texto_busqueda()` y a las tablas `marcas`/`vehiculos`,
+que en esa base todavía no existían: **Internal Server Error** en todo el
+sistema. Local andaba perfecto, porque local sí tenía las migraciones
+aplicadas — o sea que es un error que no se ve hasta que alguien abre el
+sitio publicado.
+
+**Cualquier cambio que sume una migración necesita los dos pasos**, y el
+orden importa: primero la base, después el código. Al revés (que es lo que
+pasó) hay una ventana en la que producción está roto.
+
+```
+npx supabase db push        # aplica a la base de Supabase lo que falte
+git push origin main        # recién ahora, que dispara el deploy de Vercel
+```
+
+Para ver qué le falta a producción antes de tocar nada, `npx supabase
+migration list` muestra local contra remoto lado a lado — una fila con
+`remote` vacío es una migración que todavía no se aplicó allá.
+
 ## Seed de datos: proveedores reales + datos de prueba (14/08/2026)
 
 `scripts/seed_datos_prueba.py` reemplaza a `db.seed_demo_data()` como forma de
