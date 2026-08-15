@@ -293,6 +293,44 @@ def sugerencias_busqueda(conn, q, limite=5):
     return [f["nombre"] for f in filas]
 
 
+# Las tres dimensiones que llevan contador al lado de cada opción. El auto no
+# lleva contador: la lista de vehículos puede ser larga y el contador exigiría
+# una consulta por vehículo cargado.
+DIMENSIONES_FACETAS = ["categoria", "subcategoria", "marca"]
+
+
+def facetas_productos(conn, q=None, categoria=None, subcategoria=None, marca=None,
+                      vehiculo_id=None, solo_con_stock=False):
+    """Cuántos productos hay en cada opción de cada filtro, para mostrarlo al
+    lado (`Frenos (128)`), más el total que cumple TODOS los filtros.
+
+    Cada dimensión se cuenta SIN aplicar su propio filtro: si al elegir Frenos
+    el contador de Embragues cayera a cero, el usuario no podría ver que hay
+    otra opción con productos y quedaría encerrado en su propia elección.
+    """
+    filtros = dict(q=q, categoria=categoria, subcategoria=subcategoria,
+                   marca=marca, vehiculo_id=vehiculo_id, solo_con_stock=solo_con_stock)
+
+    condiciones, params = _condiciones_busqueda(**filtros)
+    consulta = "SELECT count(*) AS n FROM productos p"
+    if condiciones:
+        consulta += " WHERE " + " AND ".join(condiciones)
+    resultado = {"total": conn.execute(consulta, params).fetchone()["n"]}
+
+    for dimension in DIMENSIONES_FACETAS:
+        condiciones, params = _condiciones_busqueda(**filtros, excluir=(dimension,))
+        consulta = f"SELECT p.{dimension} AS valor, count(*) AS n FROM productos p"
+        if condiciones:
+            consulta += " WHERE " + " AND ".join(condiciones)
+        consulta += f" GROUP BY p.{dimension}"
+        resultado[dimension] = {
+            fila["valor"]: fila["n"]
+            for fila in conn.execute(consulta, params).fetchall()
+            if fila["valor"]  # los productos sin subcategoría no son una opción
+        }
+    return resultado
+
+
 def obtener_cotizaciones_producto(conn, producto_id):
     """Cotizaciones de proveedores activos para un producto, de menor a
     mayor precio_costo. Es la fuente única del criterio de "mejor precio"
