@@ -63,3 +63,24 @@ def test_los_productos_sin_subcategoria_no_rompen(db_conn, catalogo):
     facetas = db.facetas_productos(db_conn)
     assert facetas["total"] == 5
     assert None not in facetas["subcategoria"]
+
+
+def test_marca_en_distinta_capitalizacion_da_una_sola_opcion_de_faceta(db_conn):
+    """El catálogo real sale de listas de precios de proveedores con la
+    marca escrita distinto (COBREQ / Cobreq / cobreq). Agrupar por la
+    columna p.marca cruda mostraba esa marca tres veces en el desplegable
+    de /productos, cada una con su propio contador de 1 -- aunque el
+    filtro de marca (que sí compara normalizado) ya devolvía los tres
+    productos al elegir cualquiera de las tres opciones."""
+    for nombre, marca in [("Pastilla A", "Cobreq"), ("Pastilla B", "COBREQ")]:
+        db_conn.execute(
+            """INSERT INTO productos (nombre, categoria, marca, precio_costo, precio_venta)
+               VALUES (%s, 'Frenos', %s, 100, 130)""",
+            (nombre, marca),
+        )
+    facetas = db.facetas_productos(db_conn)
+    assert len(facetas["marca"]) == 1, facetas["marca"]
+    (nombre_faceta, cantidad), = facetas["marca"].items()
+    assert cantidad == 2
+    # Y filtrar usando esa misma opción devuelve los dos productos.
+    assert len(db.buscar_productos(db_conn, marca=nombre_faceta)) == 2

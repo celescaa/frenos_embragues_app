@@ -129,6 +129,25 @@ def test_encuentra_por_el_auto_vinculado_escribiendolo(db_conn, catalogo):
     assert "Kit de embrague" in nombres(db.buscar_productos(db_conn, q="palio embrague"))
 
 
+def test_encuentra_por_el_motor_del_auto_vinculado(db_conn, catalogo):
+    """El desplegable y /vehiculos muestran el auto como 'FIAT Palio 1.4'. Si
+    el usuario copia ese texto tal cual al buscador, la palabra del motor
+    tiene que matchear igual que la marca y el modelo -- si no, esa palabra
+    no aparece en ningún campo del producto y la búsqueda entera se vacía
+    (cada palabra tiene que estar en algún lado)."""
+    vehiculo_id = db_conn.execute(
+        """INSERT INTO vehiculos (marca_auto, modelo, motor)
+           VALUES ('FIAT', 'Palio', '1.4') RETURNING id"""
+    ).fetchone()["id"]
+    db_conn.execute(
+        "INSERT INTO producto_vehiculos (producto_id, vehiculo_id) VALUES (%s, %s)",
+        (catalogo["Kit de embrague"], vehiculo_id),
+    )
+    assert "Kit de embrague" in nombres(
+        db.buscar_productos(db_conn, q="fiat palio 1.4")
+    )
+
+
 def test_el_codigo_de_barras_matchea_exacto_y_no_por_parecido(db_conn, catalogo):
     """Es lo que dispara la pistola: un match aproximado ahí sería cargar el
     producto equivocado en la venta."""

@@ -107,8 +107,8 @@ enabled = true
 # Port to use for the email testing server web interface.
 port = 54424
 # Uncomment to expose additional ports for testing user applications that send emails.
-# smtp_port = 54325
-# pop3_port = 54326
+# smtp_port = 54425
+# pop3_port = 54426
 # admin_email = "admin@email.com"
 # sender_name = "Admin"
 
@@ -395,7 +395,7 @@ deno_version = 2
 # reales, revisar si sigue pasando y, si no, volver a poner `true`.
 [analytics]
 enabled = false
-port = 54327
+port = 54427
 # Configure one of the supported backends: `postgres`, `bigquery`.
 backend = "postgres"
 

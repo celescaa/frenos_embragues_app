@@ -189,9 +189,15 @@ def obtener_vehiculos(conn=None, solo_activos=True):
 
 
 # Campos de `productos` sobre los que busca el texto libre, concatenados y
-# normalizados. Tiene que coincidir EXACTAMENTE con la expresión del índice
-# `productos_texto_trgm` de la migración: si difieren, el índice deja de
-# usarse y la búsqueda se vuelve lenta sin que nada avise.
+# normalizados. La expresión coincide con la del índice `productos_texto_trgm`
+# de la migración, pero eso NO alcanza para que el índice se use: la
+# condición real de más abajo la combina con `OR p.codigo_barras = %s OR
+# {TEXTO_VEHICULOS_SQL}`, y un OR con un EXISTS no es indexable — Postgres
+# recorre la tabla entera (visto con EXPLAIN sobre 3.000 productos: Seq Scan,
+# el índice nunca aparece en el plan). El índice sí sirve para
+# `marcas_nombre_normalizado`. Si algún día hace falta que esta búsqueda use
+# el índice trigram, hay que sacar el EXISTS del OR: resolver los ids que
+# matchean por auto en una consulta aparte y meterlos como `p.id = ANY(%s)`.
 TEXTO_PRODUCTO_SQL = """texto_busqueda(
     coalesce(p.nombre, '') || ' ' || coalesce(p.codigo, '') || ' ' ||
     coalesce(p.marca, '') || ' ' || coalesce(p.modelo_compatible, '')
@@ -199,11 +205,14 @@ TEXTO_PRODUCTO_SQL = """texto_busqueda(
 
 # Lo mismo para los autos vinculados, para que escribir "palio" encuentre un
 # producto que no dice "Palio" en ninguno de sus campos pero está vinculado
-# a un Palio.
+# a un Palio. Incluye el motor: el desplegable y /vehiculos muestran el auto
+# como "FIAT Palio 1.4", así que si alguien copia ese texto al buscador, la
+# palabra del motor tiene que matchear igual que la marca y el modelo — si
+# no, esa palabra no aparece en ningún campo y la búsqueda se vacía.
 TEXTO_VEHICULOS_SQL = """EXISTS (
     SELECT 1 FROM producto_vehiculos pv JOIN vehiculos v ON v.id = pv.vehiculo_id
     WHERE pv.producto_id = p.id
-      AND texto_busqueda(v.marca_auto || ' ' || v.modelo) LIKE '%%' || texto_busqueda(%s) || '%%'
+      AND texto_busqueda(v.marca_auto || ' ' || v.modelo || ' ' || v.motor) LIKE '%%' || texto_busqueda(%s) || '%%'
 )"""
 
 
@@ -341,14 +350,29 @@ def facetas_productos(conn, q=None, categoria=None, subcategoria=None, marca=Non
 
     for dimension in DIMENSIONES_FACETAS:
         condiciones, params = _condiciones_busqueda(**filtros, excluir=(dimension,))
-        consulta = f"SELECT p.{dimension} AS valor, count(*) AS n FROM productos p"
-        if condiciones:
-            consulta += " WHERE " + " AND ".join(condiciones)
-        consulta += f" GROUP BY p.{dimension}"
+        if dimension == "marca":
+            # Agrupado por texto normalizado, no por la columna p.marca cruda:
+            # el catálogo real sale de listas de precios de proveedores con
+            # la misma marca escrita distinto (COBREQ / Cobreq / cobreq).
+            # Agrupar por la columna cruda mostraba esa marca tres veces en
+            # el desplegable, cada una con su propio contador de 1, aunque
+            # el filtro de marca (más abajo) ya comparaba normalizado y
+            # devolvía las tres al elegir cualquiera. min(btrim(...)) elige
+            # una grafía cualquiera de display para el grupo; cuál de las
+            # tres queda no importa, lo que importa es que sea una sola.
+            consulta = "SELECT min(btrim(p.marca)) AS valor, count(*) AS n FROM productos p"
+            if condiciones:
+                consulta += " WHERE " + " AND ".join(condiciones)
+            consulta += " GROUP BY texto_busqueda(p.marca)"
+        else:
+            consulta = f"SELECT p.{dimension} AS valor, count(*) AS n FROM productos p"
+            if condiciones:
+                consulta += " WHERE " + " AND ".join(condiciones)
+            consulta += f" GROUP BY p.{dimension}"
         resultado[dimension] = {
             fila["valor"]: fila["n"]
             for fila in conn.execute(consulta, params).fetchall()
-            if fila["valor"]  # los productos sin subcategoría no son una opción
+            if fila["valor"]  # los productos sin subcategoría/marca no son una opción
         }
     return resultado
 

@@ -50,7 +50,7 @@
     <div class="form-check">
       <input class="form-check-input" type="checkbox" name="solo_con_stock" value="1"
              id="soloConStock" {{ 'checked' if solo_con_stock }} onchange="this.form.submit()">
-      <label class="form-check-label small" for="soloConStock">Con stock</label>
+      <label class="form-check-label small" for="soloConStock">Sólo con stock</label>
     </div>
   </div>
 </form>
@@ -58,13 +58,28 @@
 {% if q or categoria or subcategoria or marca or vehiculo_id or solo_con_stock %}
   <div class="mb-3 small">
     <span class="text-muted me-1">Filtrando por:</span>
-    {% for etiqueta, parametro in [(q, 'q'), (categoria, 'categoria'), (subcategoria, 'subcategoria'), (marca, 'marca')] %}
-      {% if etiqueta %}
-        <span class="badge bg-secondary me-1">{{ etiqueta }}
-          <a href="{{ url_for('productos_lista', **(request.args.to_dict() | reject_key(parametro))) }}"
-             class="text-white text-decoration-none ms-1">&times;</a></span>
-      {% endif %}
-    {% endfor %}
+    {% if q %}
+      <span class="badge bg-secondary me-1">{{ q }}
+        <a href="{{ url_for('productos_lista', **(request.args.to_dict() | reject_key('q'))) }}"
+           class="text-white text-decoration-none ms-1">&times;</a></span>
+    {% endif %}
+    {% if categoria %}
+      {# La X del rubro saca también el subrubro: un subrubro sin su rubro
+         no es un estado que tenga sentido (ver reject_key en core/app.py). #}
+      <span class="badge bg-secondary me-1">{{ categoria }}
+        <a href="{{ url_for('productos_lista', **(request.args.to_dict() | reject_key('categoria', 'subcategoria'))) }}"
+           class="text-white text-decoration-none ms-1">&times;</a></span>
+    {% endif %}
+    {% if subcategoria %}
+      <span class="badge bg-secondary me-1">{{ subcategoria }}
+        <a href="{{ url_for('productos_lista', **(request.args.to_dict() | reject_key('subcategoria'))) }}"
+           class="text-white text-decoration-none ms-1">&times;</a></span>
+    {% endif %}
+    {% if marca %}
+      <span class="badge bg-secondary me-1">{{ marca }}
+        <a href="{{ url_for('productos_lista', **(request.args.to_dict() | reject_key('marca'))) }}"
+           class="text-white text-decoration-none ms-1">&times;</a></span>
+    {% endif %}
     {% if vehiculo_id %}
       {% for v in vehiculos if v.id == vehiculo_id %}
         <span class="badge bg-secondary me-1">{{ v.marca_auto }} {{ v.modelo }} {{ v.motor }}
@@ -139,7 +154,18 @@
         </td>
       </tr>
     {% else %}
-      <tr><td colspan="11" class="text-center text-muted py-4">No hay productos cargados todavía.</td></tr>
+      {% if not sugerencias %}
+        {# Si hay sugerencias, ese alert de arriba ya explica por qué no hay
+           resultados — mostrar los dos mensajes juntos se contradice. #}
+        <tr><td colspan="11" class="text-center text-muted py-4">
+          {% if q or categoria or subcategoria or marca or vehiculo_id or solo_con_stock %}
+            Ningún producto coincide con los filtros aplicados.
+            <a href="{{ url_for('productos_lista') }}">Limpiar todo</a>
+          {% else %}
+            No hay productos cargados todavía.
+          {% endif %}
+        </td></tr>
+      {% endif %}
     {% endfor %}
     </tbody>
   </table>
@@ -155,7 +181,11 @@ function actualizarSubcategoriasFiltro(preseleccionar) {
   const categoria = document.getElementById('categoriaFiltro').value;
   const select = document.getElementById('subcategoriaFiltro');
   const opciones = subcategoriasPorCategoria[categoria] || [];
-  select.innerHTML = '<option value="">-- Todas las subcategorías --</option>';
+  // Mismo texto que la opción que renderiza el servidor ("Todos los
+  // rubros" / "Todas las marcas" / "Todos los autos"): el usuario nunca
+  // llega a ver la versión del servidor porque este script la reemplaza
+  // apenas carga la página, así que las dos tienen que decir lo mismo.
+  select.innerHTML = '<option value="">Todos los subrubros</option>';
   opciones.forEach(function(nombre) {
     const opt = document.createElement('option');
     opt.value = nombre;
@@ -170,12 +200,26 @@ document.getElementById('categoriaFiltro').addEventListener('change', function()
 actualizarSubcategoriasFiltro(true);
 
 // El buscador de texto espera a que deje de tipear antes de recargar, para
-// no disparar una consulta por cada tecla.
+// no disparar una consulta por cada tecla. 800ms, no 400: alguien que no usa
+// programas y tipea despacio (por ejemplo "pastilla palio" con una pausa en
+// el medio) hacía que la página recargara a mitad de palabra con 400ms, le
+// sacaba el foco al campo, y lo que seguía tecleando no entraba en ningún
+// lado -- parecía que el teclado había dejado de andar.
 let temporizador;
-document.getElementById('qFiltro').addEventListener('input', function() {
+const qFiltro = document.getElementById('qFiltro');
+qFiltro.addEventListener('input', function() {
   clearTimeout(temporizador);
-  temporizador = setTimeout(function() { document.getElementById('filtroForm').submit(); }, 400);
+  temporizador = setTimeout(function() { document.getElementById('filtroForm').submit(); }, 800);
 });
+
+// Si la página recargó por una búsqueda de texto (q no está vacío), devolver
+// el foco y el cursor al final de lo ya escrito. Sin esto, cada recarga deja
+// el campo sin foco y quien tipeaba tiene que volver a hacer clic ahí.
+if (qFiltro.value) {
+  qFiltro.focus();
+  const largo = qFiltro.value.length;
+  qFiltro.setSelectionRange(largo, largo);
+}
 document.getElementById('categoriaFiltro').addEventListener('change', function() {
   document.getElementById('subcategoriaFiltro').value = '';
   document.getElementById('filtroForm').submit();

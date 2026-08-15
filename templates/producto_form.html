@@ -239,12 +239,21 @@ document.getElementById('productoForm').addEventListener('submit', function() {
 
 // Filtrar la lista de autos a medida que se escribe. Con muchos autos
 // cargados, buscar el correcto scrolleando no es viable.
+//
+// Se normalizan los dos lados de la comparación (sin acentos, minúsculas):
+// mismo bug que ya se arregló en la búsqueda del sistema (core/database.py,
+// texto_busqueda()), sobreviviendo acá en JavaScript. Sin esto, escribir
+// "citroen" no encontraba "Citroën".
+function normalizarTextoAuto(s) {
+  return s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+}
 const filtroAutos = document.getElementById('filtroAutos');
 if (filtroAutos) {
   filtroAutos.addEventListener('input', function() {
-    const texto = filtroAutos.value.trim().toLowerCase();
+    const texto = normalizarTextoAuto(filtroAutos.value.trim());
     document.querySelectorAll('.fila-auto').forEach(function(fila) {
-      fila.style.display = (!texto || fila.dataset.texto.includes(texto)) ? '' : 'none';
+      const textoFila = normalizarTextoAuto(fila.dataset.texto);
+      fila.style.display = (!texto || textoFila.includes(texto)) ? '' : 'none';
     });
   });
 }

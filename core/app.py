@@ -381,10 +381,16 @@ app.jinja_env.filters["url_imagen"] = almacenamiento.url_publica
 
 
 @app.template_filter("reject_key")
-def reject_key(diccionario, clave):
-    """Los mismos parámetros de la URL menos uno, para armar el link de la X
-    de cada etiqueta de filtro sin perder los demás filtros puestos."""
-    return {k: v for k, v in diccionario.items() if k != clave}
+def reject_key(diccionario, *claves):
+    """Los mismos parámetros de la URL menos uno o más, para armar el link de
+    la X de cada etiqueta de filtro sin perder los demás filtros puestos.
+
+    Acepta varias claves porque la X del rubro tiene que sacar también el
+    subrubro: un subrubro sin su rubro no es un estado que tenga sentido, y
+    dejarlo pegado en la URL se pierde en silencio recién en el próximo
+    envío del formulario (el JS repuebla el desplegable de subrubro vacío y
+    lo manda como "Todas")."""
+    return {k: v for k, v in diccionario.items() if k not in claves}
 
 
 EXTENSIONES_IMAGEN_PERMITIDAS = {"jpg", "jpeg", "png", "webp"}
@@ -1035,7 +1041,12 @@ def productos_lista():
         limite=LIMITE_RESULTADOS,
         categorias=db.obtener_categorias(conn),
         subcategorias_json=subcategorias_por_categoria_json(conn),
-        marcas=[m["nombre"] for m in conn.execute("SELECT nombre FROM marcas ORDER BY nombre")],
+        # El desplegable de marca sale de las facetas (agrupadas por texto
+        # normalizado), no de la tabla `marcas`: esa tabla nunca borra nada
+        # y puede tener grafías viejas que ningún producto usa más (ver
+        # CLAUDE.md, sección del buscador). Las facetas siempre reflejan
+        # los productos que hay de verdad.
+        marcas=sorted(facetas["marca"].keys(), key=str.casefold),
         vehiculos=db.obtener_vehiculos(conn),
         mejores_precios=mejores_precios,
         **filtros,
