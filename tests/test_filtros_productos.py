@@ -95,8 +95,21 @@ def test_un_auto_invalido_no_rompe_la_pantalla(client, catalogo):
     assert respuesta.status_code == 200
 
 
+def test_un_error_de_tipeo_ya_muestra_el_producto(client, catalogo):
+    """"pastila" ya no necesita sugerencia: la búsqueda tolerante lo rescata
+    sola y muestra la pastilla, avisando que no es literal lo que se escribió.
+    Antes esto caía en el "¿Quisiste decir?" y había que hacer un clic más."""
+    texto = client.get("/productos?q=pastila").data.decode()
+    assert "Pastilla delantera" in texto
+    assert "quisiste decir" not in texto.lower()
+    assert "lo más parecido" in texto
+
+
 def test_muestra_sugerencias_cuando_no_hay_resultados(client, catalogo):
-    respuesta = client.get("/productos?q=pastila")
+    """Con una palabra que no se puede rescatar ("heladera" no se parece a
+    nada del catálogo), la búsqueda queda vacía y ahí sí entra la sugerencia
+    sobre la palabra que sí se parecía."""
+    respuesta = client.get("/productos?q=pastila+heladera")
     assert "quisiste decir" in respuesta.data.decode().lower()
     assert b"Pastilla delantera" in respuesta.data
 
@@ -145,7 +158,7 @@ def test_mensaje_vacio_no_aparece_junto_a_las_sugerencias(client, catalogo):
     """Cuando hay sugerencias ('¿Quisiste decir?'), ese alert ya explica por
     qué no hay resultados -- mostrar además el mensaje de la tabla vacía es
     contradictorio (las dos cosas dicen algo distinto a la vez)."""
-    respuesta = client.get("/productos?q=pastila")
+    respuesta = client.get("/productos?q=pastila+heladera")
     texto = respuesta.data.decode()
     assert "quisiste decir" in texto.lower()
     assert "Ningún producto coincide" not in texto

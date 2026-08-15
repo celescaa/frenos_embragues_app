@@ -97,6 +97,15 @@
 {% endif %}
 
 {% if productos %}
+  {# Si hubo que buscar por parecido, se avisa: lo que se ve NO es
+     exactamente lo que se escribió, y callárselo haría creer que el
+     producto se llama así. #}
+  {% if busqueda_difusa %}
+    <div class="alert alert-info py-2">
+      No encontré nada escrito tal cual "<strong>{{ q }}</strong>".
+      Te muestro lo más parecido.
+    </div>
+  {% endif %}
   <p class="text-muted small">
     {% if total > limite %}
       Mostrando {{ limite }} de {{ total }} — afiná el filtro para verlos todos.
