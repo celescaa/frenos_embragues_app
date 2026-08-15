@@ -379,6 +379,20 @@ app.jinja_env.filters["money"] = money
 
 app.jinja_env.filters["url_imagen"] = almacenamiento.url_publica
 
+
+@app.template_filter("reject_key")
+def reject_key(diccionario, *claves):
+    """Los mismos parámetros de la URL menos uno o más, para armar el link de
+    la X de cada etiqueta de filtro sin perder los demás filtros puestos.
+
+    Acepta varias claves porque la X del rubro tiene que sacar también el
+    subrubro: un subrubro sin su rubro no es un estado que tenga sentido, y
+    dejarlo pegado en la URL se pierde en silencio recién en el próximo
+    envío del formulario (el JS repuebla el desplegable de subrubro vacío y
+    lo manda como "Todas")."""
+    return {k: v for k, v in diccionario.items() if k not in claves}
+
+
 EXTENSIONES_IMAGEN_PERMITIDAS = {"jpg", "jpeg", "png", "webp"}
 
 
@@ -972,47 +986,73 @@ def guardar_cotizaciones_proveedor(conn, producto_id, form):
         )
 
 
+def guardar_vehiculos_producto(conn, producto_id, form):
+    """Reemplaza los autos vinculados a un producto por los tildados en el
+    formulario. Borrar y reinsertar (en vez de calcular la diferencia) es más
+    simple y no tiene efectos visibles: la tabla no guarda ningún dato propio
+    del vínculo más allá de qué producto va con qué auto.
+
+    Los ids pasan por a_entero() como cualquier id que venga de un formulario:
+    Postgres aborta la consulta con un id no numérico, a diferencia de SQLite.
+    """
+    conn.execute("DELETE FROM producto_vehiculos WHERE producto_id = %s", (producto_id,))
+    vistos = set()
+    for valor in form.getlist("vehiculo_id"):
+        vehiculo_id = a_entero(valor)
+        if vehiculo_id and vehiculo_id not in vistos:
+            vistos.add(vehiculo_id)
+            conn.execute(
+                "INSERT INTO producto_vehiculos (producto_id, vehiculo_id) VALUES (%s, %s)",
+                (producto_id, vehiculo_id),
+            )
+
+
 # ---------------------------------------------------------------------------
 # Productos / Stock
 # ---------------------------------------------------------------------------
+# Tope de filas dibujadas en Stock. Con los ~6.000 productos del catálogo
+# real, dibujar la tabla entera cuelga el navegador. La pantalla avisa
+# cuántos quedaron afuera en vez de aparentar que no hay más.
+LIMITE_RESULTADOS = 200
+
+
 @app.route("/productos")
 def productos_lista():
     conn = db.get_connection()
-    q = request.args.get("q", "").strip()
-    categoria = request.args.get("categoria", "").strip()
-    subcategoria = request.args.get("subcategoria", "").strip()
-
-    condiciones = []
-    parametros = []
-    if q:
-        # el mismo buscador de texto libre de siempre, ahora también matchea
-        # por modelo de auto compatible (ej. "Gol") además de nombre/código/
-        # marca — no hace falta un campo de búsqueda aparte para eso.
-        condiciones.append("(nombre ILIKE %s OR codigo ILIKE %s OR marca ILIKE %s OR modelo_compatible ILIKE %s OR codigo_barras = %s)")
-        parametros += [f"%{q}%", f"%{q}%", f"%{q}%", f"%{q}%", q]
-    if categoria:
-        condiciones.append("categoria = %s")
-        parametros.append(categoria)
-    if subcategoria:
-        condiciones.append("subcategoria = %s")
-        parametros.append(subcategoria)
-
-    consulta = "SELECT * FROM productos"
-    if condiciones:
-        consulta += " WHERE " + " AND ".join(condiciones)
-    consulta += " ORDER BY categoria, nombre"
-    productos = conn.execute(consulta, parametros).fetchall()
-
-    categorias = db.obtener_categorias(conn)
-    subcategorias_json = subcategorias_por_categoria_json(conn)
-    # mismo criterio de "mejor precio" que ya usa /pedidos (db.obtener_mejor_precio_por_producto),
-    # calculado solo, sin que haga falta elegir manualmente un proveedor.
-    mejores_precios = {p["id"]: db.obtener_mejor_precio_por_producto(conn, p["id"]) for p in productos}
-    conn.close()
-    return render_template(
-        "productos.html", productos=productos, q=q, categoria=categoria, subcategoria=subcategoria,
-        categorias=categorias, subcategorias_json=subcategorias_json, mejores_precios=mejores_precios,
+    filtros = dict(
+        q=request.args.get("q", "").strip() or None,
+        categoria=request.args.get("categoria", "").strip() or None,
+        subcategoria=request.args.get("subcategoria", "").strip() or None,
+        marca=request.args.get("marca", "").strip() or None,
+        vehiculo_id=a_entero(request.args.get("vehiculo_id")),
+        solo_con_stock=request.args.get("solo_con_stock") == "1",
     )
+
+    productos = db.buscar_productos(conn, limite=LIMITE_RESULTADOS, **filtros)
+    facetas = db.facetas_productos(conn, **filtros)
+    sugerencias = db.sugerencias_busqueda(conn, filtros["q"]) if not productos else []
+
+    mejores_precios = {p["id"]: db.obtener_mejor_precio_por_producto(conn, p["id"]) for p in productos}
+    contexto = dict(
+        productos=productos,
+        facetas=facetas,
+        sugerencias=sugerencias,
+        total=facetas["total"],
+        limite=LIMITE_RESULTADOS,
+        categorias=db.obtener_categorias(conn),
+        subcategorias_json=subcategorias_por_categoria_json(conn),
+        # El desplegable de marca sale de las facetas (agrupadas por texto
+        # normalizado), no de la tabla `marcas`: esa tabla nunca borra nada
+        # y puede tener grafías viejas que ningún producto usa más (ver
+        # CLAUDE.md, sección del buscador). Las facetas siempre reflejan
+        # los productos que hay de verdad.
+        marcas=sorted(facetas["marca"].keys(), key=str.casefold),
+        vehiculos=db.obtener_vehiculos(conn),
+        mejores_precios=mejores_precios,
+        **filtros,
+    )
+    conn.close()
+    return render_template("productos.html", **contexto)
 
 
 @app.route("/productos/nuevo", methods=["GET", "POST"])
@@ -1040,6 +1080,11 @@ def productos_nuevo():
         )
         producto_id = cur.fetchone()["id"]
         guardar_cotizaciones_proveedor(conn, producto_id, request.form)
+        guardar_vehiculos_producto(conn, producto_id, request.form)
+        # La lista de marcas se mantiene sola desde acá: no hay pantalla de
+        # administración de marcas, así que si esto no corre el filtro de
+        # marca queda desactualizado respecto de los productos.
+        conn.execute("SELECT sembrar_marcas_desde_productos()")
 
         nombre_imagen = guardar_imagen_producto(producto_id, request.files.get("imagen"))
         if nombre_imagen:
@@ -1052,10 +1097,13 @@ def productos_nuevo():
     proveedores = conn.execute("SELECT * FROM proveedores WHERE activo IS TRUE ORDER BY nombre").fetchall()
     categorias = db.obtener_categorias(conn)
     subcategorias_json = subcategorias_por_categoria_json(conn)
+    vehiculos = db.obtener_vehiculos(conn)
+    marcas = [m["nombre"] for m in conn.execute("SELECT nombre FROM marcas ORDER BY nombre")]
     conn.close()
     return render_template(
         "producto_form.html", producto=None, proveedores=proveedores, cotizaciones=[],
         categorias=categorias, subcategorias_json=subcategorias_json,
+        vehiculos=vehiculos, vehiculos_del_producto=[], marcas=marcas,
     )
 
 
@@ -1084,6 +1132,11 @@ def productos_editar(producto_id):
             ),
         )
         guardar_cotizaciones_proveedor(conn, producto_id, request.form)
+        guardar_vehiculos_producto(conn, producto_id, request.form)
+        # La lista de marcas se mantiene sola desde acá: no hay pantalla de
+        # administración de marcas, así que si esto no corre el filtro de
+        # marca queda desactualizado respecto de los productos.
+        conn.execute("SELECT sembrar_marcas_desde_productos()")
 
         producto_actual = conn.execute("SELECT imagen FROM productos WHERE id=%s", (producto_id,)).fetchone()
         if request.form.get("eliminar_imagen") == "1":
@@ -1123,10 +1176,29 @@ def productos_editar(producto_id):
         del_producto = subcategorias_json.setdefault(producto["categoria"], [])
         if producto["subcategoria"] not in del_producto:
             del_producto.append(producto["subcategoria"])
+    vehiculos_del_producto = [
+        f["vehiculo_id"] for f in conn.execute(
+            "SELECT vehiculo_id FROM producto_vehiculos WHERE producto_id = %s",
+            (producto_id,),
+        ).fetchall()
+    ]
+    # incluye también los autos ya vinculados a este producto aunque estén
+    # desactivados, para no perder el vínculo de la ficha si se desactivaron
+    # después (mismo criterio que con proveedor/categoría más arriba). Sin
+    # esto, guardar cualquier cambio del producto —el precio, el stock, lo
+    # que sea— borraba en silencio el vínculo con un auto ya desactivado,
+    # porque guardar_vehiculos_producto() reemplaza todo por lo tildado y un
+    # auto que no aparece en la lista no puede llegar tildado.
+    vehiculos = conn.execute(
+        "SELECT * FROM vehiculos WHERE activo = true OR id = ANY(%s) ORDER BY marca_auto, modelo, motor",
+        (vehiculos_del_producto,),
+    ).fetchall()
+    marcas = [m["nombre"] for m in conn.execute("SELECT nombre FROM marcas ORDER BY nombre")]
     conn.close()
     return render_template(
         "producto_form.html", producto=producto, proveedores=proveedores, cotizaciones=cotizaciones,
         categorias=categorias, subcategorias_json=subcategorias_json,
+        vehiculos=vehiculos, vehiculos_del_producto=vehiculos_del_producto, marcas=marcas,
     )
 
 
@@ -1384,6 +1456,73 @@ def subcategorias_desactivar(subcategoria_id):
     conn.close()
     flash("Subcategoría desactivada: no va a aparecer para elegir en productos nuevos.", "info")
     return redirect(url_for("categorias_lista", todas=request.args.get("todas", "")))
+
+
+@app.route("/vehiculos")
+def vehiculos_lista():
+    conn = db.get_connection()
+    vehiculos = db.obtener_vehiculos(conn, solo_activos=False)
+    usos = {
+        fila["vehiculo_id"]: fila["n"]
+        for fila in conn.execute(
+            "SELECT vehiculo_id, count(*) AS n FROM producto_vehiculos GROUP BY vehiculo_id"
+        ).fetchall()
+    }
+    conn.close()
+    return render_template("vehiculos.html", vehiculos=vehiculos, usos=usos)
+
+
+@app.route("/vehiculos/nuevo", methods=["POST"])
+def vehiculos_nuevo():
+    marca_auto = request.form.get("marca_auto", "").strip()
+    modelo = request.form.get("modelo", "").strip()
+    motor = request.form.get("motor", "").strip()
+    if not (marca_auto and modelo and motor):
+        flash("Marca, modelo y motor son obligatorios.", "warning")
+        return redirect(url_for("vehiculos_lista"))
+    conn = db.get_connection()
+    try:
+        conn.execute(
+            """INSERT INTO vehiculos (marca_auto, modelo, motor, anio_desde, anio_hasta)
+               VALUES (%s, %s, %s, %s, %s)""",
+            (marca_auto, modelo, motor,
+             a_entero(request.form.get("anio_desde")),
+             a_entero(request.form.get("anio_hasta"))),
+        )
+        conn.commit()
+        flash(f"Se agregó {marca_auto} {modelo} {motor}.", "success")
+    except psycopg.errors.UniqueViolation:
+        conn.rollback()
+        flash(f"{marca_auto} {modelo} {motor} ya estaba cargado.", "warning")
+    conn.close()
+    return redirect(url_for("vehiculos_lista"))
+
+
+@app.route("/vehiculos/<int:vehiculo_id>/activar", methods=["POST"])
+def vehiculos_activar(vehiculo_id):
+    conn = db.get_connection()
+    conn.execute("UPDATE vehiculos SET activo = NOT activo WHERE id = %s", (vehiculo_id,))
+    conn.commit()
+    conn.close()
+    return redirect(url_for("vehiculos_lista"))
+
+
+@app.route("/vehiculos/<int:vehiculo_id>/eliminar", methods=["POST"])
+def vehiculos_eliminar(vehiculo_id):
+    conn = db.get_connection()
+    try:
+        conn.execute("DELETE FROM vehiculos WHERE id = %s", (vehiculo_id,))
+        conn.commit()
+        flash("Auto eliminado.", "success")
+    except psycopg.errors.ForeignKeyViolation:
+        # Mismo criterio que un proveedor con compras cargadas: se avisa con
+        # un mensaje claro y se ofrece desactivarlo, en vez de dejar escapar
+        # el error de la base.
+        conn.rollback()
+        flash("No se puede eliminar: hay productos vinculados a este auto. "
+              "Desactivalo si no querés que aparezca más.", "warning")
+    conn.close()
+    return redirect(url_for("vehiculos_lista"))
 
 
 # ---------------------------------------------------------------------------

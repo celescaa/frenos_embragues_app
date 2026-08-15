@@ -21,9 +21,14 @@ from psycopg.rows import dict_row
 
 # Cadena de conexión. En desarrollo apunta al Postgres local que levanta
 # `npx supabase start`; en producción, al pooler de Supabase.
+#
+# El puerto es 54422, no el 54322 que la CLI de Supabase usa por defecto: ese
+# default es idéntico para cualquier proyecto, así que dos proyectos locales de
+# la misma persona se pelean por él (pasó dos veces con `hogar-gestion`). Los
+# puertos de este proyecto están corridos +100 en supabase/config.toml.
 DATABASE_URL = os.environ.get(
     "DATABASE_URL",
-    "postgresql://postgres:postgres@127.0.0.1:54322/postgres",
+    "postgresql://postgres:postgres@127.0.0.1:54422/postgres",
 )
 
 # El negocio está en Ituzaingó, provincia de Buenos Aires. "Hoy" es el día
@@ -164,6 +169,212 @@ def obtener_subcategorias(conn=None, categoria_id=None, solo_activas=True):
     if conn_propia:
         conn.close()
     return filas
+
+
+def obtener_vehiculos(conn=None, solo_activos=True):
+    """Autos cargados, para el desplegable del filtro y para vincularlos a un
+    producto. Mismo patrón que obtener_categorias(): si no se pasa una
+    conexión abierta, abre y cierra una propia."""
+    conn_propia = conn is None
+    if conn_propia:
+        conn = get_connection()
+    consulta = "SELECT * FROM vehiculos"
+    if solo_activos:
+        consulta += " WHERE activo = true"
+    consulta += " ORDER BY marca_auto, modelo, motor"
+    filas = conn.execute(consulta).fetchall()
+    if conn_propia:
+        conn.close()
+    return filas
+
+
+# Campos de `productos` sobre los que busca el texto libre, concatenados y
+# normalizados. La expresión coincide con la del índice `productos_texto_trgm`
+# de la migración, pero eso NO alcanza para que el índice se use: la
+# condición real de más abajo la combina con `OR p.codigo_barras = %s OR
+# {TEXTO_VEHICULOS_SQL}`, y un OR con un EXISTS no es indexable — Postgres
+# recorre la tabla entera (visto con EXPLAIN sobre 3.000 productos: Seq Scan,
+# el índice nunca aparece en el plan). El índice sí sirve para
+# `marcas_nombre_normalizado`. Si algún día hace falta que esta búsqueda use
+# el índice trigram, hay que sacar el EXISTS del OR: resolver los ids que
+# matchean por auto en una consulta aparte y meterlos como `p.id = ANY(%s)`.
+TEXTO_PRODUCTO_SQL = """texto_busqueda(
+    coalesce(p.nombre, '') || ' ' || coalesce(p.codigo, '') || ' ' ||
+    coalesce(p.marca, '') || ' ' || coalesce(p.modelo_compatible, '')
+)"""
+
+# Lo mismo para los autos vinculados, para que escribir "palio" encuentre un
+# producto que no dice "Palio" en ninguno de sus campos pero está vinculado
+# a un Palio. Incluye el motor: el desplegable y /vehiculos muestran el auto
+# como "FIAT Palio 1.4", así que si alguien copia ese texto al buscador, la
+# palabra del motor tiene que matchear igual que la marca y el modelo — si
+# no, esa palabra no aparece en ningún campo y la búsqueda se vacía.
+TEXTO_VEHICULOS_SQL = """EXISTS (
+    SELECT 1 FROM producto_vehiculos pv JOIN vehiculos v ON v.id = pv.vehiculo_id
+    WHERE pv.producto_id = p.id
+      AND texto_busqueda(v.marca_auto || ' ' || v.modelo || ' ' || v.motor) LIKE '%%' || texto_busqueda(%s) || '%%'
+)"""
+
+
+def _condiciones_busqueda(q=None, categoria=None, subcategoria=None, marca=None,
+                          vehiculo_id=None, solo_con_stock=False, excluir=()):
+    """Arma el WHERE compartido por buscar_productos() y facetas_productos().
+
+    `excluir` nombra filtros a NO aplicar: los contadores de cada filtro se
+    calculan sin aplicarse a sí mismos, para que digan cuántos productos
+    habría si el usuario cambiara de opción (si no, el filtro elegido siempre
+    mostraría su propio total y el resto en cero).
+    """
+    condiciones, params = [], []
+
+    # Cada palabra por separado, en cualquier orden: alguien que busca
+    # "palio pastilla" tiene que encontrar "PASTILLA DE FRENO FIAT PALIO".
+    # Se compara sobre texto ya normalizado con LIKE (no ILIKE): ILIKE sobre
+    # la columna cruda no podría usar el índice trigram. El patrón se arma
+    # en SQL con texto_busqueda(%s), no en Python: normalizar la palabra con
+    # .lower() de este lado saca las mayúsculas pero no los acentos, y
+    # texto_busqueda() sí los saca, así que los dos lados quedaban
+    # normalizados distinto y buscar escribiendo el acento no encontraba
+    # nada.
+    for palabra in (q or "").split():
+        condiciones.append(
+            f"({TEXTO_PRODUCTO_SQL} LIKE '%%' || texto_busqueda(%s) || '%%' "
+            f"OR p.codigo_barras = %s OR {TEXTO_VEHICULOS_SQL})"
+        )
+        # El código de barras matchea EXACTO, nunca por parecido: es lo que
+        # dispara la pistola y un match aproximado sería cargar el producto
+        # equivocado en la venta.
+        params += [palabra, palabra, palabra]
+
+    if categoria and "categoria" not in excluir:
+        condiciones.append("p.categoria = %s")
+        params.append(categoria)
+    if subcategoria and "subcategoria" not in excluir:
+        condiciones.append("p.subcategoria = %s")
+        params.append(subcategoria)
+    if marca and "marca" not in excluir:
+        condiciones.append("texto_busqueda(p.marca) = texto_busqueda(%s)")
+        params.append(marca)
+    if vehiculo_id and "vehiculo_id" not in excluir:
+        condiciones.append(
+            "EXISTS (SELECT 1 FROM producto_vehiculos pv "
+            "WHERE pv.producto_id = p.id AND pv.vehiculo_id = %s)"
+        )
+        params.append(vehiculo_id)
+    if solo_con_stock:
+        condiciones.append("p.stock_actual > 0")
+
+    return condiciones, params
+
+
+def buscar_productos(conn, q=None, categoria=None, subcategoria=None, marca=None,
+                     vehiculo_id=None, solo_con_stock=False, limite=None):
+    """Punto único de búsqueda de productos del sistema.
+
+    Antes este criterio estaba escrito tres veces (la pantalla de Stock, el
+    JSON del buscador tipo autocompletar y el catálogo de la tienda) y ya
+    habían divergido entre sí. Cualquier pantalla que busque productos llama
+    acá: si no, vuelve a haber una pantalla que busca mejor que otra.
+    """
+    condiciones, params = _condiciones_busqueda(
+        q, categoria, subcategoria, marca, vehiculo_id, solo_con_stock
+    )
+    consulta = "SELECT p.* FROM productos p"
+    if condiciones:
+        consulta += " WHERE " + " AND ".join(condiciones)
+    consulta += " ORDER BY p.categoria, p.nombre"
+    if limite:
+        consulta += " LIMIT %s"
+        params = params + [limite]
+    return conn.execute(consulta, params).fetchall()
+
+
+# Parecido mínimo (0 a 1) para ofrecer una sugerencia. 0.3 es el default
+# histórico de pg_trgm y tolera un par de letras cambiadas ("pastila" ->
+# "pastilla") sin ofrecer cualquier cosa. Subirlo deja sin sugerencia
+# errores reales; bajarlo sugiere productos que no tienen nada que ver.
+UMBRAL_SUGERENCIA = 0.3
+
+
+def sugerencias_busqueda(conn, q, limite=5):
+    """Nombres parecidos a lo que se escribió, para cuando la búsqueda no
+    devuelve nada. Es una sugerencia que se le muestra al usuario, NO un
+    reemplazo automático: no se le cambia a alguien lo que buscó sin avisarle.
+
+    Usa word_similarity() en vez de similarity(): similarity() compara las
+    dos cadenas completas, así que un nombre de producto largo ("Pastilla de
+    freno delantera") diluye el parecido de una palabra sola tipeada con
+    error ("pastila") muy por debajo de 0.3 aunque la palabra que importa
+    matchee casi perfecto. word_similarity() busca el mejor tramo delimitado
+    por palabra dentro del nombre completo, que es el caso real de mostrador
+    (el cliente escribe una palabra, no el nombre entero del producto).
+    """
+    texto = (q or "").strip()
+    if not texto:
+        return []
+    filas = conn.execute(
+        """SELECT p.nombre,
+                  word_similarity(texto_busqueda(%s), texto_busqueda(p.nombre)) AS parecido
+           FROM productos p
+           WHERE word_similarity(texto_busqueda(%s), texto_busqueda(p.nombre)) >= %s
+           ORDER BY parecido DESC, p.nombre
+           LIMIT %s""",
+        (texto, texto, UMBRAL_SUGERENCIA, limite),
+    ).fetchall()
+    return [f["nombre"] for f in filas]
+
+
+# Las tres dimensiones que llevan contador al lado de cada opción. El auto no
+# lleva contador: la lista de vehículos puede ser larga y el contador exigiría
+# una consulta por vehículo cargado.
+DIMENSIONES_FACETAS = ["categoria", "subcategoria", "marca"]
+
+
+def facetas_productos(conn, q=None, categoria=None, subcategoria=None, marca=None,
+                      vehiculo_id=None, solo_con_stock=False):
+    """Cuántos productos hay en cada opción de cada filtro, para mostrarlo al
+    lado (`Frenos (128)`), más el total que cumple TODOS los filtros.
+
+    Cada dimensión se cuenta SIN aplicar su propio filtro: si al elegir Frenos
+    el contador de Embragues cayera a cero, el usuario no podría ver que hay
+    otra opción con productos y quedaría encerrado en su propia elección.
+    """
+    filtros = dict(q=q, categoria=categoria, subcategoria=subcategoria,
+                   marca=marca, vehiculo_id=vehiculo_id, solo_con_stock=solo_con_stock)
+
+    condiciones, params = _condiciones_busqueda(**filtros)
+    consulta = "SELECT count(*) AS n FROM productos p"
+    if condiciones:
+        consulta += " WHERE " + " AND ".join(condiciones)
+    resultado = {"total": conn.execute(consulta, params).fetchone()["n"]}
+
+    for dimension in DIMENSIONES_FACETAS:
+        condiciones, params = _condiciones_busqueda(**filtros, excluir=(dimension,))
+        if dimension == "marca":
+            # Agrupado por texto normalizado, no por la columna p.marca cruda:
+            # el catálogo real sale de listas de precios de proveedores con
+            # la misma marca escrita distinto (COBREQ / Cobreq / cobreq).
+            # Agrupar por la columna cruda mostraba esa marca tres veces en
+            # el desplegable, cada una con su propio contador de 1, aunque
+            # el filtro de marca (más abajo) ya comparaba normalizado y
+            # devolvía las tres al elegir cualquiera. min(btrim(...)) elige
+            # una grafía cualquiera de display para el grupo; cuál de las
+            # tres queda no importa, lo que importa es que sea una sola.
+            consulta = "SELECT min(btrim(p.marca)) AS valor, count(*) AS n FROM productos p"
+            if condiciones:
+                consulta += " WHERE " + " AND ".join(condiciones)
+            consulta += " GROUP BY texto_busqueda(p.marca)"
+        else:
+            consulta = f"SELECT p.{dimension} AS valor, count(*) AS n FROM productos p"
+            if condiciones:
+                consulta += " WHERE " + " AND ".join(condiciones)
+            consulta += f" GROUP BY p.{dimension}"
+        resultado[dimension] = {
+            fila["valor"]: fila["n"]
+            for fila in conn.execute(consulta, params).fetchall()
+            if fila["valor"]  # los productos sin subcategoría/marca no son una opción
+        }
+    return resultado
 
 
 def obtener_cotizaciones_producto(conn, producto_id):

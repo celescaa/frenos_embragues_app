@@ -32,7 +32,7 @@ TABLAS_ESPERADAS = [
     "pedido_web_items", "usuarios", "cuenta_corriente_movimientos",
     "cuenta_corriente_movimiento_items", "movimientos_no_facturados",
     "categorias", "subcategorias", "promociones_aplicadas",
-    "promocion_productos",
+    "promocion_productos", "marcas", "vehiculos", "producto_vehiculos",
 ]
 
 

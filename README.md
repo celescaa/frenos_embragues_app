@@ -44,9 +44,9 @@ depender de internet.
    La primera vez descarga las imágenes de Docker (puede tardar unos
    minutos) y después aplica el esquema de `supabase/migrations/`. Al
    terminar imprime varias URLs y claves; la que importa acá es `DB URL`
-   (por default `postgresql://postgres:postgres@127.0.0.1:54322/postgres`).
+   (por default `postgresql://postgres:postgres@127.0.0.1:54422/postgres`).
    También imprime la URL de **Studio**, un panel visual para ver/editar
-   las tablas sin escribir SQL a mano (`http://127.0.0.1:54323` por
+   las tablas sin escribir SQL a mano (`http://127.0.0.1:54423` por
    default).
 
 6. Copiar `.env.example` a un archivo nuevo llamado `.env`. Si se usa la
@@ -131,7 +131,7 @@ python -m pytest tests/ -v
 ```
 
 Por default corren contra el mismo Postgres local de la instalación
-(`postgresql://postgres:postgres@127.0.0.1:54322/postgres`); se puede
+(`postgresql://postgres:postgres@127.0.0.1:54422/postgres`); se puede
 apuntar a otra base con la variable `DATABASE_URL_TEST`. La suite deja la
 base de pruebas limpia (sin datos de ejemplo) al terminar cada test, así
 que es segura de correr las veces que haga falta — pero no correrla contra

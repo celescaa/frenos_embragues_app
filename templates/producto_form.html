@@ -53,7 +53,10 @@
     <div class="row">
       <div class="col-md-6 mb-3">
         <label class="form-label">Marca</label>
-        <input type="text" name="marca" class="form-control" value="{{ producto.marca if producto else '' }}">
+        <input type="text" name="marca" class="form-control" list="marcasCargadas" value="{{ producto.marca if producto else '' }}">
+        <datalist id="marcasCargadas">
+          {% for m in marcas %}<option value="{{ m }}"></option>{% endfor %}
+        </datalist>
       </div>
       <div class="col-md-6 mb-3">
         <label class="form-label">Modelo compatible</label>
@@ -98,6 +101,31 @@
     </div>
 
     <hr class="my-4">
+
+    <div class="card p-3 mb-3">
+      <h6 class="mb-2">Autos compatibles <span class="text-muted fw-normal">(opcional)</span></h6>
+      {% if vehiculos %}
+        <input type="text" id="filtroAutos" class="form-control form-control-sm mb-2"
+               placeholder="Filtrar la lista de autos..." autocomplete="off">
+        <div style="max-height:220px; overflow-y:auto;">
+          {% for v in vehiculos %}
+            <div class="form-check fila-auto" data-texto="{{ (v.marca_auto ~ ' ' ~ v.modelo ~ ' ' ~ v.motor)|lower }}">
+              <input class="form-check-input" type="checkbox" name="vehiculo_id" value="{{ v.id }}"
+                     id="auto{{ v.id }}" {{ 'checked' if v.id in vehiculos_del_producto }}>
+              <label class="form-check-label" for="auto{{ v.id }}">
+                {{ v.marca_auto }} {{ v.modelo }} <span class="text-muted">{{ v.motor }}</span>
+                {% if not v.activo %}<span class="badge bg-secondary ms-1">desactivado</span>{% endif %}
+              </label>
+            </div>
+          {% endfor %}
+        </div>
+      {% else %}
+        <p class="text-muted mb-0 small">
+          Todavía no hay autos cargados. Cargalos en <a href="{{ url_for('vehiculos_lista') }}">Stock → Autos</a>
+          y después volvé a vincularlos acá.
+        </p>
+      {% endif %}
+    </div>
 
     <div class="d-flex justify-content-between align-items-center mb-2">
       <div>
@@ -208,5 +236,26 @@ document.getElementById('productoForm').addEventListener('submit', function() {
     if (!proveedor || !precio) fila.remove();
   });
 });
+
+// Filtrar la lista de autos a medida que se escribe. Con muchos autos
+// cargados, buscar el correcto scrolleando no es viable.
+//
+// Se normalizan los dos lados de la comparación (sin acentos, minúsculas):
+// mismo bug que ya se arregló en la búsqueda del sistema (core/database.py,
+// texto_busqueda()), sobreviviendo acá en JavaScript. Sin esto, escribir
+// "citroen" no encontraba "Citroën".
+function normalizarTextoAuto(s) {
+  return s.normalize('NFD').replace(/[̀-ͯ]/g, '').toLowerCase();
+}
+const filtroAutos = document.getElementById('filtroAutos');
+if (filtroAutos) {
+  filtroAutos.addEventListener('input', function() {
+    const texto = normalizarTextoAuto(filtroAutos.value.trim());
+    document.querySelectorAll('.fila-auto').forEach(function(fila) {
+      const textoFila = normalizarTextoAuto(fila.dataset.texto);
+      fila.style.display = (!texto || textoFila.includes(texto)) ? '' : 'none';
+    });
+  });
+}
 </script>
 {% endblock %}

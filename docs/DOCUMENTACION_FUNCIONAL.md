@@ -74,11 +74,46 @@ Alta, edición y baja de productos: categoría, marca, modelo compatible,
 costo, precio de venta, stock actual y mínimo, código de barras, foto.
 Alerta visual en rojo cuando algo está en o por debajo del mínimo. Desde la
 ficha del producto también se cargan las cotizaciones de distintos
-proveedores para el mismo producto (ver "Pedidos" más abajo).
+proveedores para el mismo producto (ver "Pedidos" más abajo), y los autos a
+los que sirve ese repuesto.
 
 **Antes:** el stock "real" vivía en la cabeza de alguien o se estimaba. No
 había forma sistemática de saber qué faltaba hasta que un cliente lo pedía
 y no estaba. **Ahora:** el sistema avisa solo antes de que se termine.
+
+**Buscador con filtros (14/08/2026):** arriba del listado hay una barra
+para filtrar por rubro, subrubro, marca y auto compatible, más un tilde de
+"sólo con stock" y un buscador de texto libre. Los filtros se combinan
+entre sí, se aplican solos (sin apretar ningún botón), y cada opción
+muestra cuántos productos hay — así nunca lleva a un rubro vacío. Los
+filtros puestos se ven como etiquetas con una X para sacar uno solo sin
+perder los demás.
+
+El buscador de texto está pensado para quien no usa programas y no
+necesariamente escribe bien el nombre del repuesto: no importan las
+mayúsculas ni los acentos, no importa en qué orden se escriban las
+palabras ("palio pastilla" encuentra "Pastilla de freno FIAT Palio"), y si
+hay un error de tipeo ("pastila") se ofrece la sugerencia más parecida en
+vez de mostrar la pantalla vacía sin explicación.
+
+**Antes:** encontrar un repuesto puntual en una lista larga era desplazarse
+a mano o adivinar el nombre exacto cargado. **Ahora:** filtrar en cascada
+(elegir el rubro y después, si hace falta, afinar por marca o auto) o
+tipear como se hable, con margen para el error.
+
+### Autos compatibles (`/vehiculos`)
+Lista de autos (marca, modelo y motor — el motor es obligatorio, con la
+opción "Todos los motores" para el repuesto que sirve para cualquier motor
+de ese auto; el año es opcional) que se vinculan a los productos desde la
+ficha de cada uno, para poder filtrar el Stock por "todo lo que sirve para
+un Fiat Palio". No hace falta cargarlos todos de entrada: un producto sin
+auto vinculado sigue apareciendo en el resto de las búsquedas igual que
+antes, y el campo de texto libre "compatible con" que ya existía en la
+ficha del producto sigue funcionando y la búsqueda lo sigue mirando.
+
+**Ahorra:** no depender de que el mostrador recuerde de memoria qué
+repuesto sirve para qué auto, ni de escribir el auto distinto cada vez en
+cada producto.
 
 ### Categorías
 Antes eran cinco categorías fijas escritas en el código (Frenos, Embragues,
