@@ -189,6 +189,76 @@ PRODUCTOS = [
      "VTH", "VW Gol / Saveiro", "9100.00", "16400.00", 11, 4, "Zerbini", "7791234500344"),
 ]
 
+# Autos compatibles. Sin esto, el filtro "Auto" de /productos aparece vacío y
+# parece roto, aunque el resto de la pantalla tenga datos de sobra.
+#
+# Salen de desarmar los `modelo_compatible` de PRODUCTOS, que vienen escritos
+# como los escribe un proveedor ("VW Gol / Saveiro", "Fiat Palio / Siena"):
+# ahí hay DOS autos en un solo campo de texto, y separarlos es justamente lo
+# que la tabla `vehiculos` vino a resolver.
+#
+# `motor` es obligatorio por diseño (ver CLAUDE.md): para el repuesto que
+# sirve en cualquier motor del mismo auto se usa el valor explícito
+# "Todos los motores", en vez de dejarlo vacío y tener que decidir en cada
+# consulta si vacío significa "no sé" o "cualquiera".
+# (marca_auto, modelo, motor, anio_desde, anio_hasta)
+VEHICULOS = [
+    ("VW", "Gol Trend", "1.6", 2008, 2019),
+    ("VW", "Voyage", "1.6", 2009, 2019),
+    ("VW", "Saveiro", "1.6", 2010, 2020),
+    ("VW", "Amarok", "2.0 TDI", 2011, None),
+    ("Fiat", "Cronos", "1.3", 2018, None),
+    ("Fiat", "Argo", "1.3", 2017, None),
+    ("Fiat", "Palio", "1.4", 2004, 2016),
+    ("Fiat", "Siena", "1.4", 2004, 2016),
+    ("Fiat", "Toro", "2.0 diésel", 2016, None),
+    ("Chevrolet", "Onix", "1.4", 2012, 2019),
+    ("Chevrolet", "Prisma", "1.4", 2013, 2019),
+    ("Ford", "Ka", "1.5", 2016, None),
+    ("Ford", "Fiesta", "1.6", 2011, 2019),
+    ("Renault", "Kangoo", "1.6", 2008, 2018),
+    ("Peugeot", "208", "1.6", 2013, None),
+    ("Peugeot", "308", "1.6", 2012, 2020),
+]
+
+# codigo_producto -> autos para los que sirve, como "marca modelo".
+# Los productos "Universal" (líquido de frenos, arandelas, batería) no se
+# vinculan a propósito: sirven para cualquier auto, y atarlos a los 16 de la
+# lista los haría aparecer en todo filtro de auto como si fueran específicos.
+VEHICULOS_POR_PRODUCTO = {
+    "FR-PAS-001": ["VW Gol Trend", "VW Voyage"],
+    "FR-PAS-002": ["VW Gol Trend", "VW Voyage"],
+    "FR-PAS-003": ["Fiat Cronos", "Fiat Argo"],
+    "FR-PAS-004": ["Chevrolet Onix", "Chevrolet Prisma"],
+    "FR-DIS-001": ["VW Gol Trend"],
+    "FR-DIS-002": ["Fiat Cronos"],
+    "FR-DIS-003": ["Ford Ka", "Ford Fiesta"],
+    "FR-CAM-001": ["Renault Kangoo"],
+    "FR-ZAP-001": ["VW Gol Trend", "VW Saveiro"],
+    "FR-BOM-001": ["Chevrolet Onix"],
+    "FR-BOM-002": ["Fiat Palio", "Fiat Siena"],
+    "FR-CAB-001": ["Peugeot 208"],
+    "FR-SEN-001": ["VW Amarok"],
+    "EMB-KIT-001": ["VW Gol Trend"],
+    "EMB-KIT-002": ["Fiat Cronos"],
+    "EMB-KIT-003": ["Ford Ka"],
+    "EMB-CRA-001": ["Chevrolet Onix", "Chevrolet Prisma"],
+    "EMB-CRA-002": ["Renault Kangoo"],
+    "EMB-BOM-001": ["Peugeot 208", "Peugeot 308"],
+    "EMB-BOM-002": ["Fiat Toro"],
+    "EMB-VOL-001": ["VW Amarok"],
+    "COR-001": ["VW Gol Trend"],
+    "COR-002": ["Fiat Cronos"],
+    "ROD-001": ["Chevrolet Onix"],
+    "ROD-002": ["VW Gol Trend"],
+    "ENC-BUJ-001": ["VW Gol Trend"],
+    "ENC-BUJ-002": ["Fiat Cronos"],
+    "ENC-CAB-001": ["VW Gol Trend"],
+    "SUS-AMO-001": ["VW Gol Trend"],
+    "SUS-BIE-001": ["Fiat Palio", "Fiat Siena"],
+    "DIR-TER-001": ["VW Gol Trend", "VW Saveiro"],
+}
+
 # (codigo_producto, proveedor, precio_costo, codigo_del_proveedor)
 # Varios productos cotizados por más de un proveedor, para que el comparador
 # de precios, la columna "Mejor precio" de /productos y el agrupado de
@@ -227,8 +297,8 @@ TABLAS_DE_DATOS = [
     "promocion_productos", "promociones_aplicadas", "movimientos_no_facturados",
     "cuenta_corriente_movimiento_items", "cuenta_corriente_movimientos",
     "pedido_web_items", "pedidos_web", "compra_items", "compras",
-    "venta_items", "ventas", "producto_proveedor", "productos",
-    "clientes", "proveedores",
+    "venta_items", "ventas", "producto_proveedor", "producto_vehiculos",
+    "vehiculos", "productos", "clientes", "proveedores",
 ]
 
 
@@ -318,6 +388,34 @@ def _sembrar_productos(conn, proveedores):
         ).fetchone()
         productos[codigo] = fila
     return productos
+
+
+def _sembrar_vehiculos(conn, productos):
+    """Carga los autos y los vincula a los productos que les sirven.
+
+    Devuelve la cantidad de vínculos creados. La clave del diccionario de
+    autos es "marca modelo" (sin el motor), que es como los nombra
+    VEHICULOS_POR_PRODUCTO: en este catálogo de prueba no hay dos motores
+    distintos del mismo auto, así que alcanza para identificarlo.
+    """
+    autos = {}
+    for marca_auto, modelo, motor, desde, hasta in VEHICULOS:
+        fila = conn.execute(
+            """INSERT INTO vehiculos (marca_auto, modelo, motor, anio_desde, anio_hasta)
+               VALUES (%s, %s, %s, %s, %s) RETURNING id""",
+            (marca_auto, modelo, motor, desde, hasta),
+        ).fetchone()
+        autos[f"{marca_auto} {modelo}"] = fila["id"]
+
+    vinculos = 0
+    for codigo, nombres in VEHICULOS_POR_PRODUCTO.items():
+        for nombre in nombres:
+            conn.execute(
+                "INSERT INTO producto_vehiculos (producto_id, vehiculo_id) VALUES (%s, %s)",
+                (productos[codigo]["id"], autos[nombre]),
+            )
+            vinculos += 1
+    return len(autos), vinculos
 
 
 def _sembrar_cotizaciones(conn, productos, proveedores):
@@ -658,6 +756,7 @@ def sembrar_datos_prueba(conn, proveedores):
 
     clientes = _sembrar_clientes(conn)
     productos = _sembrar_productos(conn, proveedores)
+    autos, vinculos = _sembrar_vehiculos(conn, productos)
     _sembrar_cotizaciones(conn, productos, proveedores)
     ventas = _sembrar_ventas(conn, clientes, productos, rnd)
     compras = _sembrar_compras(conn, proveedores, productos)
@@ -669,8 +768,9 @@ def sembrar_datos_prueba(conn, proveedores):
 
     print(
         f"Datos de prueba: {len(clientes)} clientes, {len(productos)} productos, "
-        f"{len(COTIZACIONES)} cotizaciones, {ventas} ventas, {compras} compras, "
-        "cuenta corriente, promociones, movimientos sin factura y pedidos web."
+        f"{autos} autos ({vinculos} vínculos), {len(COTIZACIONES)} cotizaciones, "
+        f"{ventas} ventas, {compras} compras, cuenta corriente, promociones, "
+        "movimientos sin factura y pedidos web."
     )
 
 

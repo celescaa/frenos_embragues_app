@@ -1187,6 +1187,20 @@ concreta tenga qué mostrar.
   `tercero_cuit_dni` cargado, el caso de "el mecánico compra a nombre de otro".
 - Las tres formas de promoción: porcentaje sobre todo el catálogo, monto fijo
   con vencimiento, y porcentaje limitado a productos puntuales.
+- **16 autos con 42 vínculos a productos** (`VEHICULOS` /
+  `VEHICULOS_POR_PRODUCTO`, sumados el 15/08/2026). Faltaban: el seed llenaba
+  todas las pantallas menos ésta, así que el filtro "Auto" de `/productos`
+  aparecía vacío y **parecía roto** aunque el resto tuviera datos de sobra.
+  Los autos salen de desarmar los `modelo_compatible` de los productos, que
+  vienen escritos como los escribe un proveedor ("VW Gol / Saveiro" son DOS
+  autos en un campo de texto) — separarlos es justamente lo que la tabla
+  `vehiculos` vino a resolver. Los productos "Universal" (líquido de frenos,
+  arandelas, batería) quedan sin vincular a propósito: atarlos a los 16 los
+  haría aparecer en todos los filtros de auto como si fueran específicos.
+  Ojo que esto es **seed**, no migración: en producción el filtro sigue vacío
+  hasta que alguien cargue los autos desde `/vehiculos` y los vincule desde
+  la ficha de cada producto. Es dato del negocio (qué pieza sirve para qué
+  auto), no algo que se pueda inventar.
 - **`stock_actual` es el stock de HOY, ya neto del historial.** Las ventas,
   compras y cargos que siembra el script son historia y no vuelven a moverlo.
   Simular el stock inicial de cada producto para que la historia "cuadre" no
@@ -1199,7 +1213,7 @@ concreta tenga qué mostrar.
   `db.hoy()` / `db.TZ_NEGOCIO` (nunca `datetime.now()`), por los dos motivos
   ya documentados más arriba.
 
-`--reemplazar` borra las 15 tablas de datos y vuelve a sembrar; pide
+`--reemplazar` borra las 17 tablas de datos y vuelve a sembrar; pide
 confirmación escrita mostrando el `DATABASE_URL` (`--sin-confirmar` la saltea,
 para tests). **No toca** `categorias`/`subcategorias` (las siembra la
 migración de Supabase) ni `usuarios` (su contraparte real vive en Supabase
