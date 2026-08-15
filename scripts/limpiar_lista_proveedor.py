@@ -40,16 +40,26 @@ def es_relevante(desc):
 
 
 def categorizar(desc):
+    """Adivina el rubro de una fila de lista de precios por su descripción.
+
+    Devuelve nombres de la taxonomía v3 (la que definió el negocio, ver
+    db.CATEGORIAS_INICIALES). Ojo con dos que cambiaron de lugar respecto de
+    la taxonomía anterior: las correas dejaron de ser un rubro propio y
+    pasaron a ser una subcategoría de Motor, y el líquido de frenos se quedó
+    sin rubro propio -- va a Frenos, sin subcategoría, porque ninguna de las
+    seis subcategorías de Frenos le corresponde.
+    """
     d = sin_acentos(desc)
     if "EMBRAGUE" in d or "COLLARIN" in d:
-        return "Embragues"
+        return "Embrague"
     if "CORREA" in d:
-        return "Correas"
-    if "LIQUIDO" in d and "FRENO" in d:
-        return "Líquidos"
+        return "Motor"
     if any(p in d for p in ("FRENO", "PASTILLA", "CAMPANA", "DISCO")):
         return "Frenos"
-    return "Otros"
+    # Literal y no db.CATEGORIA_CAJON_DE_SASTRE a propósito: este script es un
+    # limpiador de Excel puro, no abre la base nunca, e importar core.database
+    # sólo para leer una constante le agregaría psycopg de dependencia.
+    return "Varios"
 
 
 def parsear_precio_ar(valor):

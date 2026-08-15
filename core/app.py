@@ -1035,8 +1035,15 @@ def productos_lista():
         solo_con_stock=request.args.get("solo_con_stock") == "1",
     )
 
-    productos = db.buscar_productos(conn, limite=LIMITE_RESULTADOS, **filtros)
-    facetas = db.facetas_productos(conn, **filtros)
+    # Tolerante: si lo escrito no encuentra nada exacto, reintenta por
+    # parecido en vez de devolver la pantalla vacía ("bugia gol" tiene que
+    # traer las bujías de Gol). `difuso` dice si hizo falta ese rescate.
+    productos, difuso = db.buscar_productos_tolerante(
+        conn, limite=LIMITE_RESULTADOS, **filtros
+    )
+    # Las facetas se cuentan con el mismo criterio con el que se buscó, si no
+    # los contadores describen un conjunto distinto del que se está viendo.
+    facetas = db.facetas_productos(conn, difuso=difuso, **filtros)
     sugerencias = db.sugerencias_busqueda(conn, filtros["q"]) if not productos else []
 
     mejores_precios = {p["id"]: db.obtener_mejor_precio_por_producto(conn, p["id"]) for p in productos}
@@ -1044,6 +1051,7 @@ def productos_lista():
         productos=productos,
         facetas=facetas,
         sugerencias=sugerencias,
+        busqueda_difusa=difuso,
         total=facetas["total"],
         limite=LIMITE_RESULTADOS,
         categorias=db.obtener_categorias(conn),
@@ -1796,9 +1804,9 @@ def api_productos_nuevo():
         return jsonify({"ok": False, "error": "El nombre es obligatorio."}), 400
 
     codigo = request.form.get("codigo", "").strip() or None
-    categoria = request.form.get("categoria", "").strip() or "Otros"
+    categoria = request.form.get("categoria", "").strip() or db.CATEGORIA_CAJON_DE_SASTRE
     if categoria not in db.obtener_categorias():
-        categoria = "Otros"
+        categoria = db.CATEGORIA_CAJON_DE_SASTRE
     subcategoria = request.form.get("subcategoria", "").strip() or None
     marca = request.form.get("marca", "").strip() or None
     precio_costo = a_decimal(request.form.get("precio_costo"))

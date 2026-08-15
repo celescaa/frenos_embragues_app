@@ -45,10 +45,11 @@ def _categorias_validas():
 
 def _normalizar_categoria(valor):
     """Mapea el texto de la celda CATEGORIA a una categoría válida del
-    sistema, sin importar mayúsculas/acentos. Si no matchea nada, "Otros"."""
+    sistema, sin importar mayúsculas/acentos. Si no matchea nada, cae al
+    cajón de sastre (hoy "Varios")."""
     texto = _limpiar(valor)
     if not texto:
-        return "Otros"
+        return db.CATEGORIA_CAJON_DE_SASTRE
     sin_acentos = "".join(
         c for c in unicodedata.normalize("NFD", texto) if unicodedata.category(c) != "Mn"
     ).lower()
@@ -58,7 +59,7 @@ def _normalizar_categoria(valor):
         ).lower()
         if sin_acentos == candidata_sin_acentos:
             return destino
-    return "Otros"
+    return db.CATEGORIA_CAJON_DE_SASTRE
 
 
 def _limpiar(valor):
@@ -161,9 +162,12 @@ def importar_productos(ws, conn, resumen):
         codigo = _limpiar(fila[0]) or None
         categoria_original = _limpiar(fila[2])
         categoria = _normalizar_categoria(fila[2])
-        if categoria_original and categoria == "Otros" and categoria_original.lower() != "otros":
+        cajon = db.CATEGORIA_CAJON_DE_SASTRE
+        if (categoria_original and categoria == cajon
+                and categoria_original.lower() != cajon.lower()):
             resumen["avisos"].append(
-                f"'{nombre}': no reconocí la categoría '{categoria_original}', se cargó como 'Otros'."
+                f"'{nombre}': no reconocí la categoría '{categoria_original}', "
+                f"se cargó como '{cajon}'."
             )
 
         proveedor_nombre = _limpiar(fila[9])

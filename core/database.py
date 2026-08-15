@@ -85,48 +85,74 @@ def get_connection():
 # scripts/importar_datos.py todavía la usa junto con CATEGORIAS_RENOMBRADAS
 # para validar la categoría de cada fila.
 CATEGORIAS_INICIALES = [
-    "Frenos", "Embragues", "Correas", "Líquidos",
-    "Rodamientos y Mazas", "Suspensión y Dirección", "Filtros",
-    "Retenes y Juntas", "Transmisión", "Motor", "Ferretería",
-    "Otros",
+    "Frenos", "Suspensión", "Dirección", "Motor",
+    "Encendido y Eléctrico", "Embrague", "Ferretería", "Varios",
 ]
 
-# Subcategorías iniciales por categoría (taxonomía granular armada en otro
-# chat a partir de clasificar de punta a punta las listas de precios reales
-# de 5 proveedores — ~107.000 filas). Mismo criterio que CATEGORIAS_INICIALES
-# de arriba: el dato de siembra en sí ahora vive en la migración de
-# Supabase, esto queda como referencia/documentación del dato.
+# Cajón de sastre: la categoría a la que cae un producto cuyo rubro no se
+# pudo reconocer (importador, alta rápida, limpieza de listas de proveedor).
+# Estaba escrita como "Otros" en cinco lugares distintos y hubo que tocarlos
+# todos al renombrarla a "Varios" en la taxonomía v3; que viva acá evita la
+# próxima ronda de lo mismo.
+CATEGORIA_CAJON_DE_SASTRE = "Varios"
+
+# Subcategorías iniciales por categoría. Mismo criterio que
+# CATEGORIAS_INICIALES de arriba: el dato de siembra en sí vive en la
+# migración de Supabase (20260815120000_taxonomia_v3_rubros_del_negocio.sql),
+# esto queda como referencia y como fuente de la resiembra que hace la suite
+# de tests entre caso y caso.
+#
+# Los nombres van tal cual los escribió el negocio, con sus comas y sus
+# paréntesis adentro ("Cazoletas, crapodinas"). No se normalizaron a propósito:
+# son las palabras del mostrador, y el buscador ya ignora mayúsculas y acentos.
 SUBCATEGORIAS_INICIALES = {
-    "Correas": ["Correas", "Tensores y poleas"],
-    "Embragues": [
-        "Bombas y cilindros", "Crapodinas y collarines", "Discos y platos",
-        "Otros de embrague", "Volantes bimasa",
-    ],
     "Frenos": [
-        "Pastillas", "Discos", "Campanas", "Zapatas", "Seguros antirruido",
-        "Válvulas y actuadores", "Cables y sensores de desgaste",
-        "Mangueras y flexibles", "Cables y cintas", "Bombas y cilindros",
-        "Otros de frenos",
+        "Pastillas de freno", "Discos de freno", "Cintas de freno",
+        "Cilindros (bomba freno, cilindros de rueda)", "Servofreno",
+        "Cables de freno (mano)",
     ],
-    "Rodamientos y Mazas": ["Mazas de rueda", "Rodamientos y rulemanes"],
-    "Suspensión y Dirección": [
-        "Amortiguadores", "Parrillas y bujes", "Rótulas y extremos", "Bieletas",
-        "Cremalleras y bombas de dirección", "Otros de suspensión/dirección",
+    "Suspensión": [
+        "Amortiguadores", "Bieletas", "Barras de torsión y estabilizadoras",
+        "Bujes", "Cazoletas, crapodinas",
+        "Contrapesos, soportes de suspensión", "Resortes / espirales",
     ],
-    "Filtros": ["Filtro de aire", "Filtro de aceite", "Filtro de combustible"],
-    "Retenes y Juntas": ["Retenes", "Juntas", "Diafragmas"],
-    "Transmisión": [
-        "Homocinéticas", "Semiejes y palieres", "Crucetas",
-        "Coronas y diferencial", "Otros de transmisión",
+    "Dirección": [
+        "Brazos de dirección", "Cajas de dirección", "Columnas de dirección",
+        "Terminales / rótulas", "Cremalleras",
     ],
-    "Motor": ["Comando", "Encendido", "Refrigeración", "Vacío y servofreno", "Otros de motor"],
-    "Ferretería": ["Tuercas", "Arandelas", "Bulones", "Tornillos"],
+    "Motor": [
+        "Bomba de agua", "Cadenas de distribución",
+        "Correas (distribución, alternador, etc.)", "Juntas y empaquetaduras",
+        "Retenes",
+    ],
+    "Encendido y Eléctrico": [
+        "Baterías", "Bobinas", "Bujías", "Bujías precalentadoras (diesel)",
+        "Cables de bujía", "Motores de arranque / alternadores",
+    ],
+    "Embrague": [
+        "Kits de embrague (disco + plato + collarín)",
+        "Collarines / rulemanes de embrague",
+    ],
+    "Ferretería": ["Arandelas", "Bulones", "Tornillos", "Tuercas"],
+    "Varios": [
+        "Abrazaderas", "Terminales, conectores varios",
+        "Repuestos chicos sin categoría propia",
+    ],
 }
 
-# Categorías viejas (antes de sumar Correas/Líquidos) -> nuevas equivalentes.
-# Se usa tanto para actualizar productos ya cargados como en el importador,
-# por si la planilla de carga todavía tiene el desplegable viejo.
-CATEGORIAS_RENOMBRADAS = {"Freno": "Frenos", "Embrague": "Embragues", "Otro": "Otros"}
+# Nombres de categoría que quedaron en el camino -> su equivalente de hoy.
+# Sirve para dos cosas: actualizar productos ya cargados, y que el importador
+# siga aceptando una planilla completada con un desplegable viejo. Cada
+# entrada corresponde a un renombre que ya hizo alguna migración:
+#   Freno/Embrague/Otro -> plural (taxonomía v1)
+#   Embragues -> Embrague, Otros -> Varios (taxonomía v3, la actual)
+CATEGORIAS_RENOMBRADAS = {
+    "Freno": "Frenos",
+    "Embrague": "Embrague",
+    "Embragues": "Embrague",
+    "Otro": CATEGORIA_CAJON_DE_SASTRE,
+    "Otros": CATEGORIA_CAJON_DE_SASTRE,
+}
 
 
 def obtener_categorias(conn=None, solo_activas=True):
@@ -216,14 +242,34 @@ TEXTO_VEHICULOS_SQL = """EXISTS (
 )"""
 
 
+# Parecido mínimo (0 a 1) para dar por buena una palabra mal escrita.
+# Medido contra casos reales de mostrador: "bugia" contra "bujia ngk ..." da
+# 0.333 y "enbrague" contra "kit embrague ..." da 0.556, mientras que una
+# palabra que no tiene nada que ver ("bugia" contra "disco de freno") da 0.
+# Subirlo deja sin rescate el error de una sola letra, que es el más común.
+UMBRAL_PALABRA_PARECIDA = 0.3
+
+# Largo mínimo para que una palabra se busque por parecido. Con tres letras
+# el parecido deja de discriminar: "gol" da 0.75 contra "golpe" y 0.5 contra
+# "goma", así que perdonarle errores a una palabra corta convierte cualquier
+# búsqueda en un cajón de cosas al azar. Las cortas se buscan exactas nomás.
+LARGO_MINIMO_PARECIDO = 4
+
+
 def _condiciones_busqueda(q=None, categoria=None, subcategoria=None, marca=None,
-                          vehiculo_id=None, solo_con_stock=False, excluir=()):
+                          vehiculo_id=None, solo_con_stock=False, excluir=(),
+                          difuso=()):
     """Arma el WHERE compartido por buscar_productos() y facetas_productos().
 
     `excluir` nombra filtros a NO aplicar: los contadores de cada filtro se
     calculan sin aplicarse a sí mismos, para que digan cuántos productos
     habría si el usuario cambiara de opción (si no, el filtro elegido siempre
     mostraría su propio total y el resto en cero).
+
+    `difuso` es el conjunto de palabras a las que se les permite matchear
+    por parecido, además de exacto. Vacío (el default) = búsqueda exacta.
+    Quién decide ese conjunto es buscar_productos_tolerante(); ver ahí por
+    qué no son todas las palabras de la búsqueda.
     """
     condiciones, params = [], []
 
@@ -237,14 +283,30 @@ def _condiciones_busqueda(q=None, categoria=None, subcategoria=None, marca=None,
     # normalizados distinto y buscar escribiendo el acento no encontraba
     # nada.
     for palabra in (q or "").split():
-        condiciones.append(
-            f"({TEXTO_PRODUCTO_SQL} LIKE '%%' || texto_busqueda(%s) || '%%' "
-            f"OR p.codigo_barras = %s OR {TEXTO_VEHICULOS_SQL})"
-        )
-        # El código de barras matchea EXACTO, nunca por parecido: es lo que
-        # dispara la pistola y un match aproximado sería cargar el producto
-        # equivocado en la venta.
+        alternativas = [
+            f"{TEXTO_PRODUCTO_SQL} LIKE '%%' || texto_busqueda(%s) || '%%'",
+            # El código de barras matchea EXACTO, nunca por parecido: es lo
+            # que dispara la pistola y un match aproximado sería cargar el
+            # producto equivocado en la venta. Por eso queda afuera del
+            # bloque difuso de más abajo.
+            "p.codigo_barras = %s",
+            TEXTO_VEHICULOS_SQL,
+        ]
         params += [palabra, palabra, palabra]
+
+        if palabra in difuso:
+            # word_similarity() y no similarity(): compara la palabra tipeada
+            # contra el mejor tramo del texto del producto, no contra el texto
+            # entero. Con el nombre completo, una descripción larga diluye el
+            # parecido de una palabra sola muy por debajo del umbral aunque la
+            # palabra que importa matchee casi perfecto. Mismo criterio que
+            # sugerencias_busqueda(), más abajo.
+            alternativas.append(
+                f"word_similarity(texto_busqueda(%s), {TEXTO_PRODUCTO_SQL}) >= %s"
+            )
+            params += [palabra, UMBRAL_PALABRA_PARECIDA]
+
+        condiciones.append("(" + " OR ".join(alternativas) + ")")
 
     if categoria and "categoria" not in excluir:
         condiciones.append("p.categoria = %s")
@@ -268,16 +330,21 @@ def _condiciones_busqueda(q=None, categoria=None, subcategoria=None, marca=None,
 
 
 def buscar_productos(conn, q=None, categoria=None, subcategoria=None, marca=None,
-                     vehiculo_id=None, solo_con_stock=False, limite=None):
+                     vehiculo_id=None, solo_con_stock=False, limite=None,
+                     difuso=()):
     """Punto único de búsqueda de productos del sistema.
 
     Antes este criterio estaba escrito tres veces (la pantalla de Stock, el
     JSON del buscador tipo autocompletar y el catálogo de la tienda) y ya
     habían divergido entre sí. Cualquier pantalla que busque productos llama
     acá: si no, vuelve a haber una pantalla que busca mejor que otra.
+
+    Es EXACTA por default. Para perdonar errores de tipeo hay que llamar a
+    buscar_productos_tolerante(), que la usa a ella por debajo.
     """
     condiciones, params = _condiciones_busqueda(
-        q, categoria, subcategoria, marca, vehiculo_id, solo_con_stock
+        q, categoria, subcategoria, marca, vehiculo_id, solo_con_stock,
+        difuso=difuso,
     )
     consulta = "SELECT p.* FROM productos p"
     if condiciones:
@@ -287,6 +354,71 @@ def buscar_productos(conn, q=None, categoria=None, subcategoria=None, marca=None
         consulta += " LIMIT %s"
         params = params + [limite]
     return conn.execute(consulta, params).fetchall()
+
+
+def _palabras_a_perdonar(conn, q):
+    """De lo que se escribió, qué palabras conviene buscar por parecido.
+
+    Sólo las que no aparecen tal cual en NINGÚN producto del catálogo. Una
+    palabra que sí existe está bien escrita, y aflojarla de todos modos
+    arruina la búsqueda: con "pastila palio", perdonarle el "palio" (que
+    existe) traía además las pastillas de Gol y de Onix, que es justo cómo
+    alguien termina llevándose la pieza de otro auto.
+
+    Las palabras de menos de LARGO_MINIMO_PARECIDO nunca se perdonan, aunque
+    no existan: son demasiado cortas para que el parecido signifique algo.
+    """
+    a_perdonar = set()
+    for palabra in set(q.split()):
+        if len(palabra) < LARGO_MINIMO_PARECIDO:
+            continue
+        existe = conn.execute(
+            f"""SELECT EXISTS (
+                    SELECT 1 FROM productos p
+                    WHERE {TEXTO_PRODUCTO_SQL} LIKE '%%' || texto_busqueda(%s) || '%%'
+                       OR p.codigo_barras = %s
+                       OR {TEXTO_VEHICULOS_SQL}
+                ) AS existe""",
+            (palabra, palabra, palabra),
+        ).fetchone()["existe"]
+        if not existe:
+            a_perdonar.add(palabra)
+    return a_perdonar
+
+
+def buscar_productos_tolerante(conn, q=None, **filtros):
+    """Igual que buscar_productos(), pero perdona errores de tipeo.
+
+    Devuelve `(filas, difusas)`, donde `difusas` es el conjunto de palabras
+    que hubo que buscar por parecido -- vacío si alcanzó con la búsqueda
+    exacta. La pantalla lo usa para dos cosas: avisarle a la persona que lo
+    que ve no es literal lo que escribió, y pedir los contadores de los
+    filtros con el mismo criterio con el que se buscó.
+
+    Son DOS intentos, no uno con el parecido siempre prendido, y el orden es
+    lo que hace que funcione:
+
+    1. Exacto. Si encuentra algo, listo.
+    2. Recién si vino vacío, de nuevo perdonando SÓLO las palabras que no
+       existen en el catálogo (ver _palabras_a_perdonar).
+
+    Buscar siempre por parecido ensuciaría las búsquedas bien escritas:
+    "bujia" tiene 0.333 de parecido con "Buje de parrilla", así que quien
+    escribe bien terminaría viendo bujes entre las bujías. Con el parecido
+    como segundo intento, escribir bien devuelve exactamente lo pedido y
+    escribir mal ("bugia gol") igual encuentra las bujías de Gol en vez de
+    dejar la pantalla vacía.
+    """
+    filas = buscar_productos(conn, q=q, **filtros)
+    if filas or not q:
+        return filas, set()
+
+    a_perdonar = _palabras_a_perdonar(conn, q)
+    if not a_perdonar:
+        # No hay nada que aflojar: repetir la consulta daría el mismo vacío.
+        return filas, set()
+
+    return buscar_productos(conn, q=q, difuso=a_perdonar, **filtros), a_perdonar
 
 
 # Parecido mínimo (0 a 1) para ofrecer una sugerencia. 0.3 es el default
@@ -331,16 +463,22 @@ DIMENSIONES_FACETAS = ["categoria", "subcategoria", "marca"]
 
 
 def facetas_productos(conn, q=None, categoria=None, subcategoria=None, marca=None,
-                      vehiculo_id=None, solo_con_stock=False):
+                      vehiculo_id=None, solo_con_stock=False, difuso=()):
     """Cuántos productos hay en cada opción de cada filtro, para mostrarlo al
     lado (`Frenos (128)`), más el total que cumple TODOS los filtros.
 
     Cada dimensión se cuenta SIN aplicar su propio filtro: si al elegir Frenos
     el contador de Embragues cayera a cero, el usuario no podría ver que hay
     otra opción con productos y quedaría encerrado en su propia elección.
+
+    `difuso` tiene que venir con el MISMO valor que usó la búsqueda que se
+    está mostrando (lo devuelve buscar_productos_tolerante). Si no, los
+    contadores cuentan un conjunto y la tabla muestra otro: la pantalla
+    diría "Frenos (0)" arriba de una lista con frenos adentro.
     """
     filtros = dict(q=q, categoria=categoria, subcategoria=subcategoria,
-                   marca=marca, vehiculo_id=vehiculo_id, solo_con_stock=solo_con_stock)
+                   marca=marca, vehiculo_id=vehiculo_id,
+                   solo_con_stock=solo_con_stock, difuso=difuso)
 
     condiciones, params = _condiciones_busqueda(**filtros)
     consulta = "SELECT count(*) AS n FROM productos p"
