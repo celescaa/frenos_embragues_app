@@ -26,7 +26,7 @@ PG_URL_TEST = os.environ.get(
     "postgresql://postgres:postgres@127.0.0.1:54322/postgres",
 )
 
-# Las 18 tablas de datos del esquema (ver supabase/migrations/), en cualquier
+# Las 21 tablas de datos del esquema (ver supabase/migrations/), en cualquier
 # orden -- TRUNCATE ... CASCADE no necesita que respete las FK.
 TABLAS = [
     "clientes", "proveedores", "categorias", "subcategorias", "productos",
@@ -34,6 +34,7 @@ TABLAS = [
     "pedidos_web", "pedido_web_items", "usuarios",
     "cuenta_corriente_movimientos", "cuenta_corriente_movimiento_items",
     "movimientos_no_facturados", "promociones_aplicadas", "promocion_productos",
+    "marcas", "vehiculos", "producto_vehiculos",
 ]
 
 
