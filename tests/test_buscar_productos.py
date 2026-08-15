@@ -150,3 +150,21 @@ def test_el_limite_recorta(db_conn, catalogo):
 
 def test_sin_filtros_devuelve_todo(db_conn, catalogo):
     assert len(db.buscar_productos(db_conn)) == 4
+
+
+def test_sugiere_cuando_hay_un_error_de_tipeo(db_conn, catalogo):
+    """'pastila' no devuelve nada; en vez de dejar al usuario en la nada, se
+    le ofrece lo parecido."""
+    assert db.buscar_productos(db_conn, q="pastila") == []
+    sugerencias = db.sugerencias_busqueda(db_conn, "pastila")
+    assert "Pastilla de freno delantera" in sugerencias
+
+
+def test_no_sugiere_cualquier_cosa(db_conn, catalogo):
+    """Una sugerencia sin parecido real es peor que ninguna."""
+    assert db.sugerencias_busqueda(db_conn, "zzzzzzzz") == []
+
+
+def test_no_sugiere_sin_texto(db_conn, catalogo):
+    assert db.sugerencias_busqueda(db_conn, "") == []
+    assert db.sugerencias_busqueda(db_conn, None) == []

@@ -258,6 +258,41 @@ def buscar_productos(conn, q=None, categoria=None, subcategoria=None, marca=None
     return conn.execute(consulta, params).fetchall()
 
 
+# Parecido mínimo (0 a 1) para ofrecer una sugerencia. 0.3 es el default
+# histórico de pg_trgm y tolera un par de letras cambiadas ("pastila" ->
+# "pastilla") sin ofrecer cualquier cosa. Subirlo deja sin sugerencia
+# errores reales; bajarlo sugiere productos que no tienen nada que ver.
+UMBRAL_SUGERENCIA = 0.3
+
+
+def sugerencias_busqueda(conn, q, limite=5):
+    """Nombres parecidos a lo que se escribió, para cuando la búsqueda no
+    devuelve nada. Es una sugerencia que se le muestra al usuario, NO un
+    reemplazo automático: no se le cambia a alguien lo que buscó sin avisarle.
+
+    Usa word_similarity() en vez de similarity(): similarity() compara las
+    dos cadenas completas, así que un nombre de producto largo ("Pastilla de
+    freno delantera") diluye el parecido de una palabra sola tipeada con
+    error ("pastila") muy por debajo de 0.3 aunque la palabra que importa
+    matchee casi perfecto. word_similarity() busca el mejor tramo delimitado
+    por palabra dentro del nombre completo, que es el caso real de mostrador
+    (el cliente escribe una palabra, no el nombre entero del producto).
+    """
+    texto = (q or "").strip()
+    if not texto:
+        return []
+    filas = conn.execute(
+        """SELECT p.nombre,
+                  word_similarity(texto_busqueda(%s), texto_busqueda(p.nombre)) AS parecido
+           FROM productos p
+           WHERE word_similarity(texto_busqueda(%s), texto_busqueda(p.nombre)) >= %s
+           ORDER BY parecido DESC, p.nombre
+           LIMIT %s""",
+        (texto, texto, UMBRAL_SUGERENCIA, limite),
+    ).fetchall()
+    return [f["nombre"] for f in filas]
+
+
 def obtener_cotizaciones_producto(conn, producto_id):
     """Cotizaciones de proveedores activos para un producto, de menor a
     mayor precio_costo. Es la fuente única del criterio de "mejor precio"
