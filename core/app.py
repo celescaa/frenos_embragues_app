@@ -379,6 +379,14 @@ app.jinja_env.filters["money"] = money
 
 app.jinja_env.filters["url_imagen"] = almacenamiento.url_publica
 
+
+@app.template_filter("reject_key")
+def reject_key(diccionario, clave):
+    """Los mismos parámetros de la URL menos uno, para armar el link de la X
+    de cada etiqueta de filtro sin perder los demás filtros puestos."""
+    return {k: v for k, v in diccionario.items() if k != clave}
+
+
 EXTENSIONES_IMAGEN_PERMITIDAS = {"jpg", "jpeg", "png", "webp"}
 
 
@@ -996,44 +1004,44 @@ def guardar_vehiculos_producto(conn, producto_id, form):
 # ---------------------------------------------------------------------------
 # Productos / Stock
 # ---------------------------------------------------------------------------
+# Tope de filas dibujadas en Stock. Con los ~6.000 productos del catálogo
+# real, dibujar la tabla entera cuelga el navegador. La pantalla avisa
+# cuántos quedaron afuera en vez de aparentar que no hay más.
+LIMITE_RESULTADOS = 200
+
+
 @app.route("/productos")
 def productos_lista():
     conn = db.get_connection()
-    q = request.args.get("q", "").strip()
-    categoria = request.args.get("categoria", "").strip()
-    subcategoria = request.args.get("subcategoria", "").strip()
-
-    condiciones = []
-    parametros = []
-    if q:
-        # el mismo buscador de texto libre de siempre, ahora también matchea
-        # por modelo de auto compatible (ej. "Gol") además de nombre/código/
-        # marca — no hace falta un campo de búsqueda aparte para eso.
-        condiciones.append("(nombre ILIKE %s OR codigo ILIKE %s OR marca ILIKE %s OR modelo_compatible ILIKE %s OR codigo_barras = %s)")
-        parametros += [f"%{q}%", f"%{q}%", f"%{q}%", f"%{q}%", q]
-    if categoria:
-        condiciones.append("categoria = %s")
-        parametros.append(categoria)
-    if subcategoria:
-        condiciones.append("subcategoria = %s")
-        parametros.append(subcategoria)
-
-    consulta = "SELECT * FROM productos"
-    if condiciones:
-        consulta += " WHERE " + " AND ".join(condiciones)
-    consulta += " ORDER BY categoria, nombre"
-    productos = conn.execute(consulta, parametros).fetchall()
-
-    categorias = db.obtener_categorias(conn)
-    subcategorias_json = subcategorias_por_categoria_json(conn)
-    # mismo criterio de "mejor precio" que ya usa /pedidos (db.obtener_mejor_precio_por_producto),
-    # calculado solo, sin que haga falta elegir manualmente un proveedor.
-    mejores_precios = {p["id"]: db.obtener_mejor_precio_por_producto(conn, p["id"]) for p in productos}
-    conn.close()
-    return render_template(
-        "productos.html", productos=productos, q=q, categoria=categoria, subcategoria=subcategoria,
-        categorias=categorias, subcategorias_json=subcategorias_json, mejores_precios=mejores_precios,
+    filtros = dict(
+        q=request.args.get("q", "").strip() or None,
+        categoria=request.args.get("categoria", "").strip() or None,
+        subcategoria=request.args.get("subcategoria", "").strip() or None,
+        marca=request.args.get("marca", "").strip() or None,
+        vehiculo_id=a_entero(request.args.get("vehiculo_id")),
+        solo_con_stock=request.args.get("solo_con_stock") == "1",
     )
+
+    productos = db.buscar_productos(conn, limite=LIMITE_RESULTADOS, **filtros)
+    facetas = db.facetas_productos(conn, **filtros)
+    sugerencias = db.sugerencias_busqueda(conn, filtros["q"]) if not productos else []
+
+    mejores_precios = {p["id"]: db.obtener_mejor_precio_por_producto(conn, p["id"]) for p in productos}
+    contexto = dict(
+        productos=productos,
+        facetas=facetas,
+        sugerencias=sugerencias,
+        total=facetas["total"],
+        limite=LIMITE_RESULTADOS,
+        categorias=db.obtener_categorias(conn),
+        subcategorias_json=subcategorias_por_categoria_json(conn),
+        marcas=[m["nombre"] for m in conn.execute("SELECT nombre FROM marcas ORDER BY nombre")],
+        vehiculos=db.obtener_vehiculos(conn),
+        mejores_precios=mejores_precios,
+        **filtros,
+    )
+    conn.close()
+    return render_template("productos.html", **contexto)
 
 
 @app.route("/productos/nuevo", methods=["GET", "POST"])

@@ -6,32 +6,97 @@
   <a href="{{ url_for('productos_nuevo') }}" class="btn btn-primary"><i class="bi bi-plus-lg"></i> Nuevo producto</a>
 </div>
 
-<form class="row g-2 mb-3" method="get" id="filtroForm">
-  <div class="col-md-4">
+<form class="row g-2 mb-2" method="get" id="filtroForm">
+  <div class="col-md-3">
+    <input type="text" name="q" id="qFiltro" value="{{ q or '' }}" class="form-control" autocomplete="off"
+           placeholder="Buscar: pastilla palio, código, marca...">
+  </div>
+  <div class="col-md-2">
     <select name="categoria" id="categoriaFiltro" class="form-select">
-      <option value="">-- Todas las categorías --</option>
+      <option value="">Todos los rubros</option>
       {% for cat in categorias %}
-        <option value="{{ cat }}" {{ 'selected' if categoria == cat else '' }}>{{ cat }}</option>
+        <option value="{{ cat }}" {{ 'selected' if categoria == cat }}>
+          {{ cat }}{% if facetas.categoria.get(cat) %} ({{ facetas.categoria[cat] }}){% endif %}
+        </option>
       {% endfor %}
     </select>
   </div>
-  <div class="col-md-4">
+  <div class="col-md-2">
     <select name="subcategoria" id="subcategoriaFiltro" class="form-select">
-      <option value="">-- Todas las subcategorías --</option>
+      <option value="">Todos los subrubros</option>
     </select>
   </div>
-  <div class="col-md-4">
-    <input type="text" name="q" id="qFiltro" value="{{ q }}" class="form-control" autocomplete="off"
-           placeholder="Buscar por código, nombre, marca o modelo de auto (ej: Gol)...">
+  <div class="col-md-2">
+    <select name="marca" class="form-select" onchange="this.form.submit()">
+      <option value="">Todas las marcas</option>
+      {% for m in marcas %}
+        <option value="{{ m }}" {{ 'selected' if marca == m }}>
+          {{ m }}{% if facetas.marca.get(m) %} ({{ facetas.marca[m] }}){% endif %}
+        </option>
+      {% endfor %}
+    </select>
   </div>
-  <div class="col-12">
-    <button type="submit" class="btn btn-outline-primary btn-sm"><i class="bi bi-funnel"></i> Filtrar</button>
-    {% if q or categoria or subcategoria %}
-      <a href="{{ url_for('productos_lista') }}" class="btn btn-link btn-sm">Limpiar filtros</a>
-    {% endif %}
-    <span id="qContador" class="text-muted small ms-2"></span>
+  <div class="col-md-2">
+    <select name="vehiculo_id" class="form-select" onchange="this.form.submit()">
+      <option value="">Todos los autos</option>
+      {% for v in vehiculos %}
+        <option value="{{ v.id }}" {{ 'selected' if vehiculo_id == v.id }}>
+          {{ v.marca_auto }} {{ v.modelo }} {{ v.motor }}
+        </option>
+      {% endfor %}
+    </select>
+  </div>
+  <div class="col-md-1 d-flex align-items-center">
+    <div class="form-check">
+      <input class="form-check-input" type="checkbox" name="solo_con_stock" value="1"
+             id="soloConStock" {{ 'checked' if solo_con_stock }} onchange="this.form.submit()">
+      <label class="form-check-label small" for="soloConStock">Con stock</label>
+    </div>
   </div>
 </form>
+
+{% if q or categoria or subcategoria or marca or vehiculo_id or solo_con_stock %}
+  <div class="mb-3 small">
+    <span class="text-muted me-1">Filtrando por:</span>
+    {% for etiqueta, parametro in [(q, 'q'), (categoria, 'categoria'), (subcategoria, 'subcategoria'), (marca, 'marca')] %}
+      {% if etiqueta %}
+        <span class="badge bg-secondary me-1">{{ etiqueta }}
+          <a href="{{ url_for('productos_lista', **(request.args.to_dict() | reject_key(parametro))) }}"
+             class="text-white text-decoration-none ms-1">&times;</a></span>
+      {% endif %}
+    {% endfor %}
+    {% if vehiculo_id %}
+      {% for v in vehiculos if v.id == vehiculo_id %}
+        <span class="badge bg-secondary me-1">{{ v.marca_auto }} {{ v.modelo }} {{ v.motor }}
+          <a href="{{ url_for('productos_lista', **(request.args.to_dict() | reject_key('vehiculo_id'))) }}"
+             class="text-white text-decoration-none ms-1">&times;</a></span>
+      {% endfor %}
+    {% endif %}
+    {% if solo_con_stock %}
+      <span class="badge bg-secondary me-1">Sólo con stock
+        <a href="{{ url_for('productos_lista', **(request.args.to_dict() | reject_key('solo_con_stock'))) }}"
+           class="text-white text-decoration-none ms-1">&times;</a></span>
+    {% endif %}
+    <a href="{{ url_for('productos_lista') }}" class="ms-2">Limpiar todo</a>
+  </div>
+{% endif %}
+
+{% if productos %}
+  <p class="text-muted small">
+    {% if total > limite %}
+      Mostrando {{ limite }} de {{ total }} — afiná el filtro para verlos todos.
+    {% else %}
+      {{ total }} producto{{ 's' if total != 1 }}.
+    {% endif %}
+  </p>
+{% elif sugerencias %}
+  <div class="alert alert-warning">
+    No hay resultados para "<strong>{{ q }}</strong>". ¿Quisiste decir?
+    {% for s in sugerencias %}
+      <a href="{{ url_for('productos_lista', q=s) }}" class="ms-1">{{ s }}</a>{{ "," if not loop.last }}
+    {% endfor %}
+  </div>
+{% endif %}
 
 <div class="card p-3">
   <table class="table table-hover align-middle mb-0">
@@ -40,8 +105,7 @@
     </thead>
     <tbody id="productosBody">
     {% for p in productos %}
-      <tr class="fila-producto {{ 'low-stock' if p.stock_actual <= p.stock_minimo else '' }}"
-          data-search="{{ (p.nombre ~ ' ' ~ (p.codigo or '') ~ ' ' ~ (p.marca or '') ~ ' ' ~ (p.modelo_compatible or '') ~ ' ' ~ (p.codigo_barras or ''))|lower }}">
+      <tr class="fila-producto {{ 'low-stock' if p.stock_actual <= p.stock_minimo else '' }}">
         <td>
           {% if p.imagen %}
             <img src="{{ p.imagen|url_imagen }}" alt="" style="width:40px;height:40px;object-fit:cover;border-radius:6px;">
@@ -77,7 +141,6 @@
     {% else %}
       <tr><td colspan="11" class="text-center text-muted py-4">No hay productos cargados todavía.</td></tr>
     {% endfor %}
-    <tr id="filaSinCoincidencias" style="display:none;"><td colspan="11" class="text-center text-muted py-4">Ningún producto coincide con "<span id="qSinCoincidenciasTexto"></span>".</td></tr>
     </tbody>
   </table>
 </div>
@@ -106,33 +169,19 @@ document.getElementById('categoriaFiltro').addEventListener('change', function()
 });
 actualizarSubcategoriasFiltro(true);
 
-// ---------------------------------------------------------------------------
-// Coincidencias en vivo: a medida que se escribe en el buscador, se filtran
-// las filas ya renderizadas (sin esperar a apretar "Filtrar" ni recargar la
-// página). Categoría/subcategoría siguen siendo filtros de servidor, porque
-// cambian qué productos se traen; el texto libre se resuelve acá mismo.
-// ---------------------------------------------------------------------------
-const qFiltro = document.getElementById('qFiltro');
-const filas = Array.from(document.querySelectorAll('#productosBody tr.fila-producto'));
-const filaSinCoincidencias = document.getElementById('filaSinCoincidencias');
-const qContador = document.getElementById('qContador');
-
-function aplicarFiltroTexto() {
-  const q = qFiltro.value.trim().toLowerCase();
-  let visibles = 0;
-  filas.forEach(function(fila) {
-    const coincide = !q || fila.dataset.search.includes(q);
-    fila.style.display = coincide ? '' : 'none';
-    if (coincide) visibles++;
-  });
-  if (filas.length > 0) {
-    filaSinCoincidencias.style.display = visibles === 0 ? '' : 'none';
-    document.getElementById('qSinCoincidenciasTexto').textContent = q;
-  }
-  qContador.textContent = q ? (visibles + ' de ' + filas.length + ' producto(s)') : '';
-}
-
-qFiltro.addEventListener('input', aplicarFiltroTexto);
-aplicarFiltroTexto();
+// El buscador de texto espera a que deje de tipear antes de recargar, para
+// no disparar una consulta por cada tecla.
+let temporizador;
+document.getElementById('qFiltro').addEventListener('input', function() {
+  clearTimeout(temporizador);
+  temporizador = setTimeout(function() { document.getElementById('filtroForm').submit(); }, 400);
+});
+document.getElementById('categoriaFiltro').addEventListener('change', function() {
+  document.getElementById('subcategoriaFiltro').value = '';
+  document.getElementById('filtroForm').submit();
+});
+document.getElementById('subcategoriaFiltro').addEventListener('change', function() {
+  document.getElementById('filtroForm').submit();
+});
 </script>
 {% endblock %}
