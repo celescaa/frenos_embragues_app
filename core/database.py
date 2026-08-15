@@ -21,9 +21,14 @@ from psycopg.rows import dict_row
 
 # Cadena de conexión. En desarrollo apunta al Postgres local que levanta
 # `npx supabase start`; en producción, al pooler de Supabase.
+#
+# El puerto es 54422, no el 54322 que la CLI de Supabase usa por defecto: ese
+# default es idéntico para cualquier proyecto, así que dos proyectos locales de
+# la misma persona se pelean por él (pasó dos veces con `hogar-gestion`). Los
+# puertos de este proyecto están corridos +100 en supabase/config.toml.
 DATABASE_URL = os.environ.get(
     "DATABASE_URL",
-    "postgresql://postgres:postgres@127.0.0.1:54322/postgres",
+    "postgresql://postgres:postgres@127.0.0.1:54422/postgres",
 )
 
 # El negocio está en Ituzaingó, provincia de Buenos Aires. "Hoy" es el día
