@@ -33,6 +33,7 @@ No toca `categorias`/`subcategorias` (las siembra la migración de Supabase) ni
 import argparse
 import os
 import random
+import re
 import sys
 from datetime import datetime, time, timedelta
 from decimal import Decimal
@@ -40,7 +41,33 @@ from decimal import Decimal
 # database.py vive en el paquete core/, en la raíz del proyecto (un nivel
 # arriba de scripts/).
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
+# Lee DATABASE_URL de un .env si lo hay, igual que hace core/app.py. Sin esto
+# había que pasar la cadena de conexión en la línea de comandos, y apuntar a
+# una base que no sea la local significaba dejar la contraseña escrita en el
+# historial del shell.
+try:
+    from dotenv import load_dotenv
+    load_dotenv()
+except ImportError:  # el .env es una comodidad, no un requisito
+    pass
+
 from core import database as db
+
+
+def url_segura(url):
+    """La cadena de conexión sin la contraseña, para poder imprimirla.
+
+    Contra la base local da igual (la contraseña es 'postgres'), pero este
+    script se corre también contra producción, y ahí la cadena lleva la
+    contraseña real de la base: mostrarla la deja escrita en la terminal y en
+    cualquier log que la capture.
+    """
+    return re.sub(r"://([^:/@]+):[^@]*@", r"://\1:***@", url or "")
+
+
+def es_base_local(url):
+    return bool(re.search(r"@(127\.0\.0\.1|localhost|\[::1\])[:/]", url or ""))
 
 # ---------------------------------------------------------------------------
 # PARTE 1 — proveedores reales
@@ -856,8 +883,20 @@ def main(argv=None):
     )
     args = parser.parse_args(argv)
 
+    destino = url_segura(db.DATABASE_URL)
+
+    # Apuntar sin querer a producción es el accidente caro de este script, y
+    # se volvió fácil desde que lee el .env: basta con tener ahí la cadena de
+    # producción y olvidarse. Cualquier base que no sea la local pide
+    # confirmación, incluso en los modos que no borran nada.
+    if not es_base_local(db.DATABASE_URL) and not args.sin_confirmar:
+        print(f"OJO: la base NO es local -> {destino}")
+        if input("Escribí 'si' para seguir: ").strip().lower() not in ("si", "sí"):
+            print("Cancelado, no se tocó nada.")
+            return 1
+
     if args.reemplazar and not args.sin_confirmar:
-        print(f"--reemplazar BORRA todos los datos de: {db.DATABASE_URL}")
+        print(f"--reemplazar BORRA todos los datos de: {destino}")
         if input("Escribí 'borrar' para confirmar: ").strip().lower() != "borrar":
             print("Cancelado, no se tocó nada.")
             return 1
@@ -868,7 +907,7 @@ def main(argv=None):
         if args.solo_autos:
             sembrar_solo_autos(conn)
             conn.commit()
-            print("Listo, sobre:", db.DATABASE_URL)
+            print("Listo, sobre:", destino)
             return 0
 
         if args.reemplazar:
@@ -890,7 +929,7 @@ def main(argv=None):
     finally:
         conn.close()
 
-    print("Listo, sobre:", db.DATABASE_URL)
+    print("Listo, sobre:", destino)
     return 0
 
 
