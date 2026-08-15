@@ -972,6 +972,27 @@ def guardar_cotizaciones_proveedor(conn, producto_id, form):
         )
 
 
+def guardar_vehiculos_producto(conn, producto_id, form):
+    """Reemplaza los autos vinculados a un producto por los tildados en el
+    formulario. Borrar y reinsertar (en vez de calcular la diferencia) es más
+    simple y no tiene efectos visibles: la tabla no guarda ningún dato propio
+    del vínculo más allá de qué producto va con qué auto.
+
+    Los ids pasan por a_entero() como cualquier id que venga de un formulario:
+    Postgres aborta la consulta con un id no numérico, a diferencia de SQLite.
+    """
+    conn.execute("DELETE FROM producto_vehiculos WHERE producto_id = %s", (producto_id,))
+    vistos = set()
+    for valor in form.getlist("vehiculo_id"):
+        vehiculo_id = a_entero(valor)
+        if vehiculo_id and vehiculo_id not in vistos:
+            vistos.add(vehiculo_id)
+            conn.execute(
+                "INSERT INTO producto_vehiculos (producto_id, vehiculo_id) VALUES (%s, %s)",
+                (producto_id, vehiculo_id),
+            )
+
+
 # ---------------------------------------------------------------------------
 # Productos / Stock
 # ---------------------------------------------------------------------------
@@ -1040,6 +1061,11 @@ def productos_nuevo():
         )
         producto_id = cur.fetchone()["id"]
         guardar_cotizaciones_proveedor(conn, producto_id, request.form)
+        guardar_vehiculos_producto(conn, producto_id, request.form)
+        # La lista de marcas se mantiene sola desde acá: no hay pantalla de
+        # administración de marcas, así que si esto no corre el filtro de
+        # marca queda desactualizado respecto de los productos.
+        conn.execute("SELECT sembrar_marcas_desde_productos()")
 
         nombre_imagen = guardar_imagen_producto(producto_id, request.files.get("imagen"))
         if nombre_imagen:
@@ -1052,10 +1078,13 @@ def productos_nuevo():
     proveedores = conn.execute("SELECT * FROM proveedores WHERE activo IS TRUE ORDER BY nombre").fetchall()
     categorias = db.obtener_categorias(conn)
     subcategorias_json = subcategorias_por_categoria_json(conn)
+    vehiculos = db.obtener_vehiculos(conn)
+    marcas = [m["nombre"] for m in conn.execute("SELECT nombre FROM marcas ORDER BY nombre")]
     conn.close()
     return render_template(
         "producto_form.html", producto=None, proveedores=proveedores, cotizaciones=[],
         categorias=categorias, subcategorias_json=subcategorias_json,
+        vehiculos=vehiculos, vehiculos_del_producto=[], marcas=marcas,
     )
 
 
@@ -1084,6 +1113,11 @@ def productos_editar(producto_id):
             ),
         )
         guardar_cotizaciones_proveedor(conn, producto_id, request.form)
+        guardar_vehiculos_producto(conn, producto_id, request.form)
+        # La lista de marcas se mantiene sola desde acá: no hay pantalla de
+        # administración de marcas, así que si esto no corre el filtro de
+        # marca queda desactualizado respecto de los productos.
+        conn.execute("SELECT sembrar_marcas_desde_productos()")
 
         producto_actual = conn.execute("SELECT imagen FROM productos WHERE id=%s", (producto_id,)).fetchone()
         if request.form.get("eliminar_imagen") == "1":
@@ -1123,10 +1157,19 @@ def productos_editar(producto_id):
         del_producto = subcategorias_json.setdefault(producto["categoria"], [])
         if producto["subcategoria"] not in del_producto:
             del_producto.append(producto["subcategoria"])
+    vehiculos = db.obtener_vehiculos(conn)
+    vehiculos_del_producto = [
+        f["vehiculo_id"] for f in conn.execute(
+            "SELECT vehiculo_id FROM producto_vehiculos WHERE producto_id = %s",
+            (producto_id,),
+        ).fetchall()
+    ]
+    marcas = [m["nombre"] for m in conn.execute("SELECT nombre FROM marcas ORDER BY nombre")]
     conn.close()
     return render_template(
         "producto_form.html", producto=producto, proveedores=proveedores, cotizaciones=cotizaciones,
         categorias=categorias, subcategorias_json=subcategorias_json,
+        vehiculos=vehiculos, vehiculos_del_producto=vehiculos_del_producto, marcas=marcas,
     )
 
 
