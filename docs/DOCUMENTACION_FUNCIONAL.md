@@ -92,9 +92,20 @@ perder los demás.
 El buscador de texto está pensado para quien no usa programas y no
 necesariamente escribe bien el nombre del repuesto: no importan las
 mayúsculas ni los acentos, no importa en qué orden se escriban las
-palabras ("palio pastilla" encuentra "Pastilla de freno FIAT Palio"), y si
-hay un error de tipeo ("pastila") se ofrece la sugerencia más parecida en
-vez de mostrar la pantalla vacía sin explicación.
+palabras ("palio pastilla" encuentra "Pastilla de freno FIAT Palio"), y un
+error de tipeo tampoco frena la búsqueda — **escribir "bugia gol" muestra
+igual las bujías de Gol**, avisando arriba que no encontró nada escrito así
+literal y que está mostrando lo más parecido.
+
+Ese perdón tiene dos límites puestos a propósito. Primero, si lo escrito sí
+encuentra algo tal cual, se muestra eso y nada más: escribir bien nunca
+devuelve peor que escribir mal. Segundo, sólo se le perdona el error a la
+palabra que no existe en el catálogo — buscando "pastila palio", el "palio"
+se respeta al pie de la letra, porque aflojarlo traería además las pastillas
+de otros autos y así es como alguien se lleva la pieza equivocada.
+
+Cuando ni con el parecido aparece nada, se ofrece la sugerencia más cercana
+("¿Quisiste decir...?") en vez de mostrar la pantalla vacía sin explicación.
 
 **Antes:** encontrar un repuesto puntual en una lista larga era desplazarse
 a mano o adivinar el nombre exacto cargado. **Ahora:** filtrar en cascada
@@ -116,20 +127,28 @@ repuesto sirve para qué auto, ni de escribir el auto distinto cada vez en
 cada producto.
 
 ### Categorías
-Antes eran cinco categorías fijas escritas en el código (Frenos, Embragues,
-Correas, Líquidos, Otros). Ahora hay una pantalla (`/categorias`) para
-agregar una categoría nueva en el momento que se empiece a vender algo que
-no encaja en las que ya hay, sin que nadie tenga que tocar código ni pedir
-un cambio en el sistema.
+Los rubros con los que arranca el sistema son los ocho que definió el
+negocio: **Frenos, Suspensión, Dirección, Motor, Encendido y Eléctrico,
+Embrague, Ferretería y Varios**, con sus subrubros (38 en total). No están
+escritos en piedra: hay una pantalla (`/categorias`) para agregar un rubro
+nuevo en el momento que se empiece a vender algo que no encaja en los que ya
+hay, sin que nadie tenga que tocar código ni pedir un cambio en el sistema.
 
 Cada categoría, además, puede tener sus propias subcategorías para
 clasificar mejor sin que la lista principal se haga interminable — por
-ejemplo "Suspensión y Dirección" agrupa "Amortiguadores", "Bujes",
-"Parrillas", etc. Al cargar o editar un producto, primero se elige la
+ejemplo "Frenos" agrupa "Pastillas de freno", "Discos de freno",
+"Servofreno", etc. Al cargar o editar un producto, primero se elige la
 categoría y la lista de subcategorías se arma sola con las que corresponden
 a esa categoría. Tanto categorías como subcategorías se pueden desactivar
 (dejan de aparecer para elegir en productos nuevos, pero no se pierde lo ya
 cargado) o eliminar si no tienen ningún producto asignado.
+
+**Faltan algunos subrubros que el negocio seguro va a necesitar** y que no
+estaban en la lista inicial: de frenos, campanas, zapatas, mangueras,
+sensores de desgaste, seguros antirruido y líquido de frenos; de embrague,
+bombas/cilindros y volante bimasa; y los rodamientos y mazas de rueda. Los
+productos de esos tipos quedan cargados igual, con su rubro pero sin
+subrubro, hasta que alguien decida desde `/categorias` cómo llamarlos.
 
 **Ahorra:** el tiempo de ida y vuelta de pedir un cambio de código cada vez
 que el catálogo de productos crece, y evita que el listado de categorías se

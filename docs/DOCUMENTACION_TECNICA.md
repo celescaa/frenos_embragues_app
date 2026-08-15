@@ -166,14 +166,25 @@ define el esquema ni lo migra — eso vive en `supabase/migrations/` (ver
   `obtener_mejor_precio_por_producto()`) y de siembra de datos de ejemplo
   (`seed_demo_data()`, que sigue llamándose una vez al arrancar
   `core/app.py` y no hace nada si la base ya tiene productos cargados).
-- `buscar_productos()` / `facetas_productos()` / `sugerencias_busqueda()`:
-  el punto único de búsqueda de productos del sistema (antes estaba
-  repetido y ya divergido en tres lugares). Compara todo sobre
-  `texto_busqueda()`, una función SQL `IMMUTABLE` que saca mayúsculas,
-  acentos y espacios de más — ver la sección "Buscador de productos con
-  filtros" de `CLAUDE.md` para el detalle completo, incluidos dos gotchas
-  ya vividos ahí (normalizar de un solo lado de la comparación, y que un
-  `EXPLAIN` aislado no prueba que la consulta real use el índice).
+- `buscar_productos()` / `buscar_productos_tolerante()` /
+  `facetas_productos()` / `sugerencias_busqueda()`: el punto único de
+  búsqueda de productos del sistema (antes estaba repetido y ya divergido en
+  tres lugares). Compara todo sobre `texto_busqueda()`, una función SQL
+  `IMMUTABLE` que saca mayúsculas, acentos y espacios de más — ver la
+  sección "Buscador de productos con filtros" de `CLAUDE.md` para el detalle
+  completo, incluidos dos gotchas ya vividos ahí (normalizar de un solo lado
+  de la comparación, y que un `EXPLAIN` aislado no prueba que la consulta
+  real use el índice).
+  `buscar_productos()` es **exacta**: es la que usan el escaneo con pistola y
+  el resto del sistema, donde un match aproximado significa cargar el
+  producto equivocado en una venta.
+  `buscar_productos_tolerante()` la envuelve y perdona errores de tipeo
+  ("bugia gol" encuentra las bujías de Gol): reintenta por parecido sólo si
+  la búsqueda exacta vino vacía, y sólo aflojando las palabras que no
+  existen en el catálogo. Devuelve `(filas, palabras_perdonadas)`; ese
+  segundo valor hay que pasárselo a `facetas_productos(difuso=...)` para que
+  los contadores describan el mismo conjunto que se está mostrando. Ver
+  "Taxonomía v3 y búsqueda que perdona errores" en `CLAUDE.md`.
 - Las listas de referencia (`CATEGORIAS_INICIALES`, `SUBCATEGORIAS_INICIALES`,
   etc.) que también usa `scripts/importar_datos.py` para validar — el dato
   de siembra real ahora vive en la migración de Supabase, esto queda de

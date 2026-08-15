@@ -290,7 +290,12 @@ Agregado después:
 - **Foto de producto**: campo opcional en la ficha (JPG/PNG/WEBP), se guarda
   en `static/img/productos/` (fuera de git, son datos del negocio) y se
   muestra tanto en el listado de Stock como en el catálogo de la tienda.
-- **Categorías del catálogo**: `Frenos, Embragues, Correas, Líquidos, Otros`
+- **Categorías del catálogo** — ⚠️ **esta lista quedó vieja**: la taxonomía
+  vigente es la v3 del 15/08/2026 (8 rubros definidos por el negocio), ver
+  "Taxonomía v3 y búsqueda que perdona errores" más abajo. Lo que sigue de
+  este ítem se conserva porque explica el mecanismo (tabla editable,
+  renombres, importador), que no cambió.
+  `Frenos, Embragues, Correas, Líquidos, Otros`
   (antes eran solo Freno/Embrague/Otro — `database.py` tiene
   `CATEGORIAS_RENOMBRADAS` y migra automáticamente los productos viejos a la
   taxonomía nueva; ver más abajo "Categorías de producto editables", que
@@ -1404,6 +1409,126 @@ probado esta entrega:
   confirmando — nunca automático, porque descripciones casi idénticas
   ("BUJE PARRILLA DELANTERA" vs "BUJE PARRILLA TRASERA") agrupadas mal
   mandan al cliente a casa con la pieza equivocada.
+
+## Taxonomía v3 y búsqueda que perdona errores (15/08/2026)
+
+Dos pedidos de Celes en la misma tanda, los dos sobre lo mismo de fondo: que
+el sistema hable como el mostrador y no al revés.
+
+### A. Los rubros los define el negocio, no las listas de precios
+
+La taxonomía anterior (v2) salió de clasificar automáticamente ~107.000 filas
+de listas de precios de cinco proveedores. Servía para ordenar esas listas,
+pero no es como el negocio piensa su propio mostrador. Celes pasó la lista con
+la que quiere arrancar y esa es ahora la taxonomía: **8 rubros y 38
+subrubros**, en `supabase/migrations/20260815120000_taxonomia_v3_rubros_del_negocio.sql`
+y reflejados en `db.CATEGORIAS_INICIALES` / `db.SUBCATEGORIAS_INICIALES`.
+
+Frenos · Suspensión · Dirección · Motor · Encendido y Eléctrico · Embrague ·
+Ferretería · Varios.
+
+Cambios de fondo respecto de v2: **Suspensión y Dirección se separaron** en
+dos rubros, **Encendido y Eléctrico es nuevo** (antes no había dónde poner una
+batería ni una bujía), **Correas dejó de ser rubro** y pasó a subcategoría de
+Motor, y se fueron los rubros que el negocio no vende (Filtros, Transmisión,
+Rodamientos y Mazas, Líquidos, Retenes y Juntas).
+
+- **Los nombres van tal cual los escribió el negocio**, con comas y
+  paréntesis adentro ("Cazoletas, crapodinas", "Cilindros (bomba freno,
+  cilindros de rueda)", "Kits de embrague (disco + plato + collarín)"). No se
+  "prolijearon" a propósito: son las palabras del mostrador, y el buscador ya
+  ignora mayúsculas y acentos por su cuenta.
+- **La migración no borra datos de productos.** Dos renombres mueven
+  productos porque son la misma cosa con otro nombre (`Embragues` →
+  `Embrague`, `Otros`/`Otro` → `Varios`). Todo lo demás sigue el criterio que
+  ya usa el sistema para proveedores y autos: el rubro viejo que **no** tiene
+  productos se borra, y el que **sí** los tiene se desactiva — deja de
+  aparecer para elegir pero no esconde ni rompe lo cargado. Probado sobre una
+  base con productos en rubros viejos: `Transmisión` quedó desactivada con su
+  producto intacto, `Embragues` y `Otros` se borraron después de mover los
+  suyos.
+- **La subcategoría no se adivina.** Un producto que venía en
+  `Embragues / Volantes bimasa` queda en `Embrague` conservando el texto
+  `Volantes bimasa`, que ya no está en la lista. No se pierde: la ficha de
+  producto ya agrega a la lista la subcategoría que el producto trae aunque
+  no exista en la tabla (`core/app.py:1182`, guarda que ya existía para las
+  desactivadas y que cubre este caso igual).
+- **`db.CATEGORIA_CAJON_DE_SASTRE`** es nueva. `"Otros"` estaba escrito a mano
+  en cinco lugares (alta rápida de producto, importador, limpiador de listas)
+  y hubo que tocarlos todos al renombrarlo a `"Varios"`.
+  `scripts/limpiar_lista_proveedor.py` es la excepción a propósito: es un
+  limpiador de Excel puro que no abre la base nunca, e importar
+  `core.database` sólo para leer una constante le agregaría psycopg de
+  dependencia.
+- **Hay huecos conocidos en la lista nueva**, y son de negocio, no de código
+  — ver el aviso al final de esta sección.
+
+### B. El buscador perdona errores de tipeo
+
+Pedido textual: escribir **"bugia gol"** tiene que traer las bujías de Gol.
+Los acentos ya funcionaban desde las fases 1 y 2 (`texto_busqueda()` los saca
+de los dos lados); lo que faltaba era el error de tipeo — `bugia` con G no
+matchea `bujía` con J por más que se normalicen los acentos.
+
+`db.buscar_productos_tolerante(conn, q, **filtros)` devuelve
+`(filas, palabras_perdonadas)`. **Son dos intentos, y el orden es lo que hace
+que funcione:**
+
+1. Exacto (`buscar_productos()`, que sigue siendo exacta por default). Si
+   encuentra algo, listo.
+2. Recién si vino vacío, de nuevo perdonando por parecido
+   (`word_similarity()` de pg_trgm, umbral `UMBRAL_PALABRA_PARECIDA = 0.3`).
+
+**Por qué no perdonar siempre**: `bujia` tiene 0.333 de parecido con "Buje de
+parrilla", así que con el parecido siempre prendido quien escribe bien termina
+viendo bujes entre las bujías. Como segundo intento, escribir bien devuelve
+exactamente lo pedido y escribir mal igual encuentra.
+
+**Y por qué no perdonar todas las palabras del segundo intento**
+(`_palabras_a_perdonar()`): sólo se afloja la palabra que **no aparece en
+ningún producto del catálogo**. Una palabra que sí existe está bien escrita.
+Con "pastila palio", perdonarle también el "palio" traía las pastillas de Gol
+y de Onix — que es exactamente cómo alguien se lleva la pieza de otro auto.
+
+Dos límites más, los dos con test propio:
+
+- **Nada de menos de 4 letras se perdona** (`LARGO_MINIMO_PARECIDO`): "gol" da
+  0.75 de parecido contra "golpe" y 0.5 contra "goma". Perdonar palabras
+  cortas convierte cualquier búsqueda fallida en un cajón de cosas al azar.
+- **El código de barras sigue matcheando exacto y nunca por parecido**: es lo
+  que dispara la pistola, y un match aproximado ahí es cobrar otra cosa.
+
+`facetas_productos()` recibe el mismo `difuso` que usó la búsqueda. Si no, los
+contadores cuentan un conjunto y la tabla muestra otro ("Frenos (0)" arriba de
+una lista con frenos adentro).
+
+Cuando hace falta el rescate, `/productos` lo dice: *"No encontré nada escrito
+tal cual «bugia». Te muestro lo más parecido."* Callárselo haría creer que el
+producto se llama así. El "¿Quisiste decir...?" que ya existía sigue vivo pero
+se volvió más raro: ahora sólo aparece cuando ni el parecido encuentra nada
+(por ejemplo "pastila heladera", donde una palabra se rescata y la otra no).
+
+Verificado en la app corriendo, no sólo con tests: `bugia gol` trae la bujía y
+los cables de bujía de Gol con el aviso; `bujia gol` y `bujía gol` traen lo
+mismo sin aviso (exacto); `enbrague gol` rescata el kit de embrague;
+`amortigador` encuentra el amortiguador; `heladera` no devuelve nada.
+
+### Lo que hay que decidir: los huecos de la lista de rubros
+
+La lista nueva **no tiene dónde poner varias cosas que el negocio vende**, y
+por eso 12 de los 36 productos del seed quedaron sin subrubro:
+
+- **De frenos** (y el negocio es una casa de frenos): campanas, zapatas,
+  mangueras/flexibles, sensores de desgaste, seguros antirruido y **líquido de
+  frenos**.
+- **De embrague**: bombas y cilindros de embrague, volante bimasa.
+- **Rodamientos y mazas de rueda**: quedaron en Suspensión sin subrubro,
+  porque el rubro propio desapareció.
+
+Ninguna se inventó: se dejaron sin subcategoría a propósito, porque adivinar
+dónde va un repuesto es un dato del negocio, no una decisión de código. Se
+agregan desde `/categorias` en dos minutos cuando el negocio confirme los
+nombres que quiere usar.
 
 ## Estructura
 
