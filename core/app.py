@@ -644,10 +644,17 @@ def clientes_editar(cliente_id):
 @app.route("/clientes/<int:cliente_id>/eliminar", methods=["POST"])
 def clientes_eliminar(cliente_id):
     conn = db.get_connection()
-    conn.execute("DELETE FROM clientes WHERE id=%s", (cliente_id,))
-    conn.commit()
+    try:
+        conn.execute("DELETE FROM clientes WHERE id=%s", (cliente_id,))
+        conn.commit()
+        flash("Cliente eliminado.", "info")
+    except psycopg.errors.ForeignKeyViolation:
+        # Mismo criterio que un proveedor con compras cargadas: se avisa con
+        # un mensaje claro en vez de dejar escapar el error de la base.
+        conn.rollback()
+        flash("No se puede eliminar: este cliente tiene ventas o movimientos "
+              "de cuenta corriente cargados.", "danger")
     conn.close()
-    flash("Cliente eliminado.", "info")
     return redirect(url_for("clientes_lista"))
 
 
