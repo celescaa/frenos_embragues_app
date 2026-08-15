@@ -143,12 +143,9 @@ a esa categoría. Tanto categorías como subcategorías se pueden desactivar
 (dejan de aparecer para elegir en productos nuevos, pero no se pierde lo ya
 cargado) o eliminar si no tienen ningún producto asignado.
 
-**Faltan algunos subrubros que el negocio seguro va a necesitar** y que no
-estaban en la lista inicial: de frenos, campanas, zapatas, mangueras,
-sensores de desgaste, seguros antirruido y líquido de frenos; de embrague,
-bombas/cilindros y volante bimasa; y los rodamientos y mazas de rueda. Los
-productos de esos tipos quedan cargados igual, con su rubro pero sin
-subrubro, hasta que alguien decida desde `/categorias` cómo llamarlos.
+Frenos es el rubro más detallado, porque es el fuerte del local: pastillas,
+discos, campanas, zapatas, cintas, cilindros, servofreno, cables de mano,
+mangueras, sensores de desgaste, seguros antirruido y líquido de frenos.
 
 **Ahorra:** el tiempo de ida y vuelta de pedir un cambio de código cada vez
 que el catálogo de productos crece, y evita que el listado de categorías se

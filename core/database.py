@@ -110,11 +110,18 @@ SUBCATEGORIAS_INICIALES = {
         "Pastillas de freno", "Discos de freno", "Cintas de freno",
         "Cilindros (bomba freno, cilindros de rueda)", "Servofreno",
         "Cables de freno (mano)",
+        # Sumados en 20260815130000: la lista original no tenía dónde poner
+        # estas piezas, que el local vende igual.
+        "Campanas de freno", "Zapatas de freno", "Mangueras y flexibles",
+        "Sensores de desgaste", "Seguros antirruido", "Líquido de frenos",
     ],
     "Suspensión": [
         "Amortiguadores", "Bieletas", "Barras de torsión y estabilizadoras",
         "Bujes", "Cazoletas, crapodinas",
         "Contrapesos, soportes de suspensión", "Resortes / espirales",
+        # Rodamientos y mazas no quedaron como rubro propio en la lista
+        # nueva; van acá, que es el sistema del que forman parte.
+        "Mazas de rueda", "Rodamientos y rulemanes",
     ],
     "Dirección": [
         "Brazos de dirección", "Cajas de dirección", "Columnas de dirección",
@@ -132,6 +139,9 @@ SUBCATEGORIAS_INICIALES = {
     "Embrague": [
         "Kits de embrague (disco + plato + collarín)",
         "Collarines / rulemanes de embrague",
+        # Una bomba de embrague o un volante bimasa no son ninguna de las
+        # dos de arriba.
+        "Bombas y cilindros de embrague", "Volantes bimasa",
     ],
     "Ferretería": ["Arandelas", "Bulones", "Tornillos", "Tuercas"],
     "Varios": [

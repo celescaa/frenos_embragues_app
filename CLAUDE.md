@@ -1513,22 +1513,32 @@ los cables de bujía de Gol con el aviso; `bujia gol` y `bujía gol` traen lo
 mismo sin aviso (exacto); `enbrague gol` rescata el kit de embrague;
 `amortigador` encuentra el amortiguador; `heladera` no devuelve nada.
 
-### Lo que hay que decidir: los huecos de la lista de rubros
+### Los subrubros que faltaban, ya sumados (mismo día)
 
-La lista nueva **no tiene dónde poner varias cosas que el negocio vende**, y
-por eso 12 de los 36 productos del seed quedaron sin subrubro:
+La lista original dejaba sin lugar a varias piezas que el local vende, y por
+eso 12 de los 36 productos del seed quedaban sin subrubro. Celes confirmó que
+había que meterlas dentro de los rubros existentes —sin crear rubros nuevos—,
+así que `20260815130000_subrubros_faltantes.sql` agrega 10 subrubros y deja la
+taxonomía en **8 rubros / 48 subrubros**:
 
-- **De frenos** (y el negocio es una casa de frenos): campanas, zapatas,
-  mangueras/flexibles, sensores de desgaste, seguros antirruido y **líquido de
-  frenos**.
-- **De embrague**: bombas y cilindros de embrague, volante bimasa.
-- **Rodamientos y mazas de rueda**: quedaron en Suspensión sin subrubro,
-  porque el rubro propio desapareció.
+- **Frenos** (+6): Campanas de freno, Zapatas de freno, Mangueras y flexibles,
+  Sensores de desgaste, Seguros antirruido, Líquido de frenos. El líquido se
+  había quedado huérfano cuando desapareció la categoría "Líquidos" de la
+  taxonomía vieja.
+- **Embrague** (+2): Bombas y cilindros de embrague, Volantes bimasa — una
+  bomba de embrague no es ni un kit ni un collarín.
+- **Suspensión** (+2): Mazas de rueda, Rodamientos y rulemanes, que perdieron
+  su rubro propio ("Rodamientos y Mazas") en la v3.
 
-Ninguna se inventó: se dejaron sin subcategoría a propósito, porque adivinar
-dónde va un repuesto es un dato del negocio, no una decisión de código. Se
-agregan desde `/categorias` en dos minutos cuando el negocio confirme los
-nombres que quiere usar.
+**El hueco no era del seed.** Se detectó porque los productos de prueba no
+tenían dónde caer, pero una casa de frenos vende campanas y zapatas de verdad;
+que esas filas puntuales fueran inventadas no cambia eso. Los nombres siguen
+el estilo de la lista del negocio (nombran la pieza y su sistema:
+"Campanas de freno", no "Campanas").
+
+La migración **sólo agrega**: no borra, no renombra y no toca ningún producto.
+Verificada con `npx supabase db reset`, o sea aplicando toda la cadena desde
+cero. Después de esto el seed no deja ningún producto sin subrubro.
 
 ## Estructura
 
