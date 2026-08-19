@@ -214,3 +214,157 @@ def test_el_seed_guarda_la_plata_como_decimal(db_conn):
     ).fetchone()
     assert fila["precio_costo"] == D("268000.00")
     assert fila["precio_venta"] == D("429000.00")
+
+
+# --- Carga de la planilla de stock por proveedor ----------------------------
+
+def _hoja_de_planilla(filas):
+    """Arma en memoria una hoja con el encabezado real de la planilla.
+
+    El importador lee cada campo POR POSICIÓN, así que el encabezado tiene
+    que estar completo: un test que arme filas sueltas sin él no probaría el
+    mismo camino que la planilla de verdad."""
+    from openpyxl import Workbook
+
+    wb = Workbook()
+    ws = wb.active
+    ws.append([
+        "Cargar (SI/NO)", "Código interno", "Categoría", "Descripción / Nombre (*)",
+        "Marca", "Modelo compatible", "Precio costo (*)", "Precio venta (*)",
+        "Cantidad en stock (*)", "Stock mínimo", "Código de barras", "Subcategoría",
+    ])
+    for fila in filas:
+        ws.append(fila)
+    return ws
+
+
+def test_la_planilla_solo_carga_las_filas_con_cantidad(db_conn):
+    """La planilla trae el catálogo COMPLETO de cada proveedor (~200.000
+    filas) y el local trabaja una fracción. La cantidad escrita a mano es lo
+    único que distingue "esto lo tenemos" de "esto el proveedor lo vende":
+    sin este filtro, la primera carga llenaría el sistema de productos
+    fantasma en stock 0."""
+    from scripts.cargar_stock_por_proveedor import _procesar_hoja, obtener_o_crear_proveedor
+
+    proveedor_id = obtener_o_crear_proveedor(db_conn, "Proveedor De Prueba")
+    ws = _hoja_de_planilla([
+        ["SI", "CON-CANT", "Frenos", "PASTILLA QUE SI TENEMOS", "Cobreq", "Fiat Palio",
+         1000, 1300, 4, 2, None, "Pastillas de freno"],
+        ["SI", "SIN-CANT", "Frenos", "PASTILLA QUE NO TENEMOS", "Cobreq", "VW Gol",
+         1000, 1300, None, 2, None, "Pastillas de freno"],
+    ])
+    resumen = {"proveedores_nuevos": 0, "productos_nuevos": 0, "productos_actualizados": 0,
+               "sin_cantidad": 0, "avisos": []}
+    _procesar_hoja(ws, proveedor_id, "Proveedor De Prueba", db_conn, resumen)
+
+    codigos = [f["codigo"] for f in db_conn.execute(
+        "SELECT codigo FROM productos WHERE proveedor_id = %s", (proveedor_id,)
+    ).fetchall()]
+    assert codigos == ["CON-CANT"]
+    assert resumen["sin_cantidad"] == 1
+
+
+def test_una_cantidad_en_cero_si_se_carga(db_conn):
+    """Cero es un dato: significa "lo trabajamos pero se acabó", y el
+    producto tiene que existir para que aparezca en la lista de pedidos.
+    Es distinto de la celda vacía, que significa "no lo trabajamos"."""
+    from scripts.cargar_stock_por_proveedor import _procesar_hoja, obtener_o_crear_proveedor
+
+    proveedor_id = obtener_o_crear_proveedor(db_conn, "Proveedor Con Cero")
+    ws = _hoja_de_planilla([
+        ["SI", "AGOTADO", "Frenos", "PASTILLA AGOTADA", "Cobreq", "Fiat Palio",
+         1000, 1300, 0, 2, None, "Pastillas de freno"],
+    ])
+    resumen = {"proveedores_nuevos": 0, "productos_nuevos": 0, "productos_actualizados": 0,
+               "sin_cantidad": 0, "avisos": []}
+    _procesar_hoja(ws, proveedor_id, "Proveedor Con Cero", db_conn, resumen)
+
+    fila = db_conn.execute("SELECT stock_actual FROM productos WHERE codigo='AGOTADO'").fetchone()
+    assert fila is not None, "una cantidad en 0 no se puede confundir con una celda vacía"
+    assert fila["stock_actual"] == 0
+
+
+def test_la_planilla_guarda_la_subcategoria(db_conn):
+    """La columna existe en la planilla desde que se sumaron las
+    subcategorías (06/08/2026), pero este importador nunca la leía: los
+    productos entraban con el rubro cargado y el subrubro vacío, sin que
+    nada avisara."""
+    from scripts.cargar_stock_por_proveedor import _procesar_hoja, obtener_o_crear_proveedor
+
+    proveedor_id = obtener_o_crear_proveedor(db_conn, "Proveedor Con Subrubro")
+    ws = _hoja_de_planilla([
+        ["SI", "SUB-001", "Embrague", "KIT DE EMBRAGUE FIAT PALIO", "Valeo", "Fiat Palio",
+         1000, 1300, 3, 2, None, "Kits de embrague (disco + plato + collarín)"],
+    ])
+    resumen = {"proveedores_nuevos": 0, "productos_nuevos": 0, "productos_actualizados": 0,
+               "sin_cantidad": 0, "avisos": []}
+    _procesar_hoja(ws, proveedor_id, "Proveedor Con Subrubro", db_conn, resumen)
+
+    fila = db_conn.execute(
+        "SELECT categoria, subcategoria FROM productos WHERE codigo='SUB-001'"
+    ).fetchone()
+    assert fila["categoria"] == "Embrague"
+    assert fila["subcategoria"] == "Kits de embrague (disco + plato + collarín)"
+
+
+def test_el_mismo_codigo_en_otro_proveedor_no_pisa_el_producto(db_conn):
+    """Dos distribuidores venden la misma pieza con el mismo código de
+    fábrica (el extremo LT10006 está en Distrisuper y en Zerbini). Como
+    `productos.codigo` es UNIQUE, el importador le cambiaba al producto ya
+    cargado el nombre, el precio, el stock y hasta el proveedor, en silencio.
+    Ahora el segundo proveedor entra como una cotización, que es lo que el
+    comparador de precios de /pedidos necesita para elegir a quién comprarle."""
+    from scripts.cargar_stock_por_proveedor import _procesar_hoja, obtener_o_crear_proveedor
+
+    uno = obtener_o_crear_proveedor(db_conn, "Distribuidor Uno")
+    dos = obtener_o_crear_proveedor(db_conn, "Distribuidor Dos")
+    resumen = {"proveedores_nuevos": 0, "productos_nuevos": 0, "productos_actualizados": 0,
+               "sin_cantidad": 0, "sin_identificar": 0, "cotizaciones": 0, "avisos": []}
+
+    _procesar_hoja(_hoja_de_planilla([
+        ["SI", "LT10006", "Dirección", "EXTREMO PEUGEOT 205 306 504 PARTNER", "TRW",
+         "Peugeot 205", 1000, 1300, 5, 2, None, "Terminales / rótulas"],
+    ]), uno, "Distribuidor Uno", db_conn, resumen)
+    _procesar_hoja(_hoja_de_planilla([
+        ["SI", "LT10006", "Dirección", "EXTREMO DE DIRECCION", "TRW", "", 900, 1170, 7, 2,
+         None, "Terminales / rótulas"],
+    ]), dos, "Distribuidor Dos", db_conn, resumen)
+
+    productos = db_conn.execute(
+        "SELECT nombre, proveedor_id, stock_actual FROM productos WHERE codigo='LT10006'"
+    ).fetchall()
+    assert len(productos) == 1
+    assert productos[0]["nombre"] == "EXTREMO PEUGEOT 205 306 504 PARTNER", "no lo tiene que pisar"
+    assert productos[0]["proveedor_id"] == uno
+    assert productos[0]["stock_actual"] == 5
+
+    cotizaciones = {f["proveedor_id"]: f["precio_costo"] for f in db_conn.execute(
+        """SELECT pp.proveedor_id, pp.precio_costo FROM producto_proveedor pp
+           JOIN productos p ON p.id = pp.producto_id WHERE p.codigo='LT10006'"""
+    ).fetchall()}
+    assert cotizaciones == {uno: Decimal("1000.00"), dos: Decimal("900.00")}
+    assert resumen["cotizaciones"] == 1
+
+
+def test_dos_productos_distintos_que_se_llaman_igual_no_se_pisan(db_conn):
+    """Zerbini lista 12 rodamientos distintos con la descripción idéntica
+    "RODAMIENTO DE RODILLOS (CON JAULA) CONO Y CUBETA" y códigos diferentes.
+    El importador los buscaba por nombre cuando el código no estaba en la
+    base, los colapsaba en un solo producto y le dejaba el código del último:
+    11 piezas desaparecían sin que nada avisara."""
+    from scripts.cargar_stock_por_proveedor import _procesar_hoja, obtener_o_crear_proveedor
+
+    proveedor_id = obtener_o_crear_proveedor(db_conn, "Zerbini De Prueba")
+    resumen = {"proveedores_nuevos": 0, "productos_nuevos": 0, "productos_actualizados": 0,
+               "sin_cantidad": 0, "sin_identificar": 0, "cotizaciones": 0, "avisos": []}
+    _procesar_hoja(_hoja_de_planilla([
+        ["SI", codigo, "Suspensión", "RODAMIENTO DE RODILLOS (CON JAULA) CONO Y CUBETA",
+         "SKF", "", 1000, 1300, 2, 2, None, "Rodamientos y rulemanes"]
+        for codigo in ("30203", "30205", "30208")
+    ]), proveedor_id, "Zerbini De Prueba", db_conn, resumen)
+
+    codigos = sorted(f["codigo"] for f in db_conn.execute(
+        "SELECT codigo FROM productos WHERE proveedor_id = %s", (proveedor_id,)
+    ).fetchall())
+    assert codigos == ["30203", "30205", "30208"]
+    assert resumen["productos_nuevos"] == 3

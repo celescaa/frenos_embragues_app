@@ -1588,6 +1588,177 @@ La migración **sólo agrega**: no borra, no renombra y no toca ningún producto
 Verificada con `npx supabase db reset`, o sea aplicando toda la cadena desde
 cero. Después de esto el seed no deja ningún producto sin subrubro.
 
+## Planilla única de stock: los 14 proveedores en un archivo (15/08/2026)
+
+Celes pasó las 26 listas de precios que tenía juntadas (`~/Downloads/Lista De
+Precios San Ignacio/`) para dejar "todos los Excel compatibles para subir a la
+base", de modo que su hermana solo tenga que poner la cantidad que hay de cada
+producto. Salió `plantillas/Planilla_Stock_Completa.xlsx`: **202.381 filas, una
+hoja por proveedor**, con rubro, subrubro, marca, modelo compatible, costo y
+precio de venta sugerido ya completos.
+
+### No hay códigos de barras en ninguna lista, y no los va a haber
+
+Se revisaron las 26 listas columna por columna buscando EAN-13/UPC (encabezados
+y valores). **Ninguna trae código de barras.** Lo que confunde son los códigos
+internos numéricos —`00001285` de Roncal, `82011436` de Michelli— que tienen
+largo de EAN pero son códigos de fábrica.
+
+Por eso la columna queda vacía y **no conviene completarla en el Excel**: el
+sistema ya tiene el camino bueno, que es escanear la caja con la pistola desde
+la ficha del producto (el campo `codigo_barras` de `producto_form.html`, donde
+el listener global de `_escaneo_precio.html` no interfiere justamente porque el
+foco está en un input). Tipear a mano 13 dígitos leídos de una caja es más
+lento y se presta a un error que después hace cobrar otro producto.
+
+### Qué había ya hecho y qué faltaba
+
+`Planilla_Stock_Por_Proveedor_completa_1.xlsx` (que trajo Celes) ya tenía
+183.838 filas de 11 proveedores clasificadas — pero **con la taxonomía v2**,
+que la migración del 15/08/2026 reemplazó. Subirla tal cual no fallaba: el
+importador manda a "Varios" todo rubro que no reconoce, así que ~110.000
+productos se habrían ido en silencio al cajón de sastre. Ese es el trabajo
+grueso de esta tanda.
+
+Cruzando códigos se verificó que esa planilla **ya incluía** los 3 archivos de
+Papierttai, el de Rodamitre y las pastillas MAG de Sen-Sei, así que no se
+volvieron a leer. Faltaban de verdad: **Michelli** (11.824 filas) y
+**Deboto/Devoto** (24.320), más las zapatas de agosto de Sen-Sei (124).
+**Icepar y RM siguen sin lista** — sus hojas quedan vacías.
+
+**Infofren es un proveedor nuevo**, el 14: no está entre los 13 reales de
+`seed_datos_prueba.py`. Los otros 13 nombres de hoja coinciden exactamente con
+los del seed, así que cargar la planilla no los duplica.
+
+### `scripts/clasificar_repuestos.py` — el criterio, en un solo lugar
+
+Clasificador de texto puro (no abre la base) que resuelve las dos mitades del
+problema con el mismo criterio: `clasificar()` para las listas que llegan sin
+clasificar, y `reclasificar_v2()` para traducir la taxonomía vieja. Tabla de
+reglas por expresión regular, evaluadas **en orden**, sobre el texto
+normalizado (sin acentos, minúsculas) igual que `texto_busqueda()` en SQL.
+
+Tres decisiones que costaron encontrar y que conviene no revertir:
+
+- **Lo específico va antes que lo genérico, y ese orden es la mitad del
+  clasificador.** "CAZOLETA AMORTIGUADOR" es una cazoleta, no un amortiguador;
+  "CRAPODINA DE EMBRAGUE" es el collarín y "CRAPODINA" sola es la de
+  suspensión; "ROTULA DE SUSPENSION" va a Dirección porque ahí viven las
+  rótulas en la v3. Mover una regla de lugar cambia miles de filas sin que
+  nada avise.
+- **"Varios" nunca es un destino con confianza, es la ausencia de uno.** La
+  clasificación v2 no es infalible: tenía "PRECAP AXIAL DE SALIDA DE CAJA DE
+  DIRECCION" etiquetado como `Transmisión / Coronas y diferencial`. Si el
+  mapeo v2 termina en Varios pero el nombre del producto sí reconoce la pieza,
+  gana el nombre. Al revés, el rubro v2 funciona de piso cuando el texto no
+  dice nada: Infofren nombra sus productos por el auto ("SONIC / TRACKER") y
+  sin ese piso esas 1.279 filas se iban todas al cajón.
+- **Transmisión y filtros van a Varios a propósito y con regla propia y
+  primera.** La v3 no tiene esos rubros porque el negocio no los vende. Sin la
+  regla explícita, "JUNTA HOMOCINETICA" caía en Motor / Juntas y
+  empaquetaduras (es una junta de transmisión) y "FUELLE DE SEMIEJE" en
+  Suspensión.
+
+`verificar_taxonomia()` compara los nombres que el módulo escribe a mano
+contra `db.CATEGORIAS_INICIALES`/`SUBCATEGORIAS_INICIALES`, con test propio
+(`tests/test_clasificar_repuestos.py`): si una migración renombra un rubro,
+salta ahí y no en medio de una carga de 200.000 filas.
+
+Resultado sobre las 183.838 filas viejas: Varios bajó de 68.601 a 54.160 (de
+37% a 29%) y lo que queda es mayormente honesto — filtros, transmisión y
+descripciones que son solo marca y número ("SKF VKJC9666").
+
+### `scripts/armar_planilla_stock.py` — arma el archivo
+
+Lee la planilla base, la reclasifica, y le suma los proveedores que faltan vía
+un adaptador por formato (mismo patrón que `limpiar_lista_proveedor.py`). Cada
+adaptador clasifica con la columna útil de SU proveedor: Michelli trae el tipo
+de pieza en `Producto` y Devoto en `UBICACION` — ninguno de los dos lo dice en
+la descripción sola.
+
+- **Precio de venta = costo × 1,30**, el mismo margen que ya usan
+  `limpiar_lista_proveedor.py` y el alta rápida desde una compra. Editable en
+  la planilla. 2.489 filas quedan sin sugerencia porque su costo viene en 0
+  (Roncal tiene muchas así) y el importador las avisa una por una.
+- **Varias listas traen una fila por AUTO, no por producto.** Devoto es el
+  caso extremo: 24.320 filas para 9.858 productos, con el código `HQ2085`
+  repetido 58 veces. Como `productos.codigo` es UNIQUE hay que quedarse con
+  una sola, pero quedarse con la primera tiraba los otros 57 autos — que es
+  justo el dato con el que después se busca "pastilla palio". `consolidar()`
+  los acumula en `modelo_compatible` (tope de 200 caracteres). Se fusionaron
+  17.725 filas así.
+- **El encabezado se busca, no se asume en la fila 1.** La hoja SIN
+  IDENTIFICAR lleva un aviso arriba de los títulos; dándolo por sentado se
+  colaba la fila de títulos como un producto llamado "Descripción / Nombre
+  (*)" — apareció en la primera prueba de carga real.
+- Escribe con `write_only` de openpyxl por el volumen, igual que
+  `extraer_catalogo_referencia.py`. Tarda ~4 minutos.
+
+### Cinco cosas que arregla `cargar_stock_por_proveedor.py`
+
+1. **Solo carga las filas con cantidad completada.** La planilla trae el
+   catálogo entero de cada proveedor y el local trabaja una fracción: la
+   cantidad escrita a mano es lo único que distingue "esto lo tenemos" de
+   "esto el proveedor lo vende". Sin el filtro, la primera carga metía 202.381
+   productos fantasma en stock 0 — el mismo problema que ya se había decidido
+   evitar el 06/08/2026 al no importar los catálogos de referencia. **Una
+   cantidad en 0 sí se carga**: significa "lo trabajamos pero se acabó", que
+   es distinto de la celda vacía, y tiene test propio para que nadie
+   "simplifique" el chequeo a un `if not cantidad`.
+2. **Guardaba el rubro pero no el subrubro.** La columna existía en la
+   planilla desde el 06/08/2026 y este importador nunca la leía: los productos
+   entraban con `subcategoria` vacía sin que nada avisara.
+3. **No repoblaba la tabla `marcas`.** Esa tabla se llena sola al guardar un
+   producto desde la ficha, pero una carga masiva no pasa por ahí: quedaban
+   miles de marcas en productos y el `<datalist>` de la ficha vacío. Ahora
+   llama a `sembrar_marcas_desde_productos()` al terminar.
+4. **Un código repetido en la hoja de otro proveedor pisaba el producto.**
+   `productos.codigo` es UNIQUE y dos distribuidores venden la misma pieza con
+   el mismo código de fábrica: el extremo `LT10006` está en Distrisuper y en
+   Zerbini, la homocinética `NJH25-129A` en tres listas. **10.705 códigos de la
+   planilla aparecen en más de un proveedor (12.347 filas).** El UPDATE le
+   cambiaba al producto ya cargado el nombre, el precio, el stock y hasta el
+   proveedor, sin avisar. Ahora el segundo proveedor entra como una cotización
+   en `producto_proveedor` — que además es justo lo que necesita el comparador
+   de precios de `/pedidos`, y que este importador nunca había poblado (una
+   carga masiva dejaba el comparador vacío por más que la planilla trajera el
+   costo de cada proveedor).
+5. **Dos productos distintos que se llaman igual se colapsaban en uno.** El
+   importador, cuando el código no estaba en la base, lo buscaba igual **por
+   nombre**. Zerbini lista 12 rodamientos distintos (`30203`, `30205`, `30208`,
+   `30211`...) con la descripción idéntica "RODAMIENTO DE RODILLOS (CON JAULA)
+   CONO Y CUBETA": los 12 se guardaban como un solo producto, cada uno pisando
+   al anterior, y el que quedaba se llevaba el código del último. Ahora el
+   match por nombre es **solo para las filas sin código**: con código, que no
+   esté en la base significa producto nuevo y punto.
+
+Los puntos 4 y 5 se encontraron a mano después de entregar la planilla, porque
+Celes preguntó si a algunos productos se les había cortado la descripción.
+Cortada no había ninguna (se compararon las 183.206 descripciones contra el
+archivo original: 0 truncadas), pero al ir a verificarlo aparecieron estos dos,
+que son peores — no cortan un texto, hacen desaparecer productos enteros.
+
+También se corrigió el aviso final sobre el proveedor sin identificar, que
+saltaba con solo haber creado algún proveedor y mandaba a revisar productos
+que no existían.
+
+### Probado
+
+Suite completa en verde (302 tests). Además, dos cargas reales contra el
+Postgres local. Una con una planilla recortada de las 15 hojas: se cargaron
+solo las 60 filas con cantidad y se saltearon las 180 vacías; todos los rubros y subrubros
+cargados existen en la base y ninguno quedó colgado de un rubro ajeno; los
+precios entraron como `Decimal` con margen exacto 1,3000; las marcas se
+sembraron; y `facetas_productos()` devuelve los rubros de la v3 para el filtro
+de `/productos`. La otra, armada a propósito con 225 filas cuyos códigos están
+repetidos entre proveedores: entraron los 218 productos distintos sin pisarse
+(antes eran 204, con 14 sobrescritos), cada rodamiento de Zerbini conservó su
+propio código, y quedaron 225 cotizaciones con 6 productos cotizados por dos
+proveedores — o sea el comparador de precios con datos de verdad.
+
+**Lo que falta es humano**: que alguien del negocio complete la columna
+"Cantidad en stock" con lo que hay en el estante.
+
 ## Estructura
 
 ```
@@ -1610,8 +1781,14 @@ frenos_embragues_app/
 │   │                           a mano de vez en cuando (no las usa la app)
 │   ├── importar_datos.py               # carga plantillas/Plantilla_Carga_Datos.xlsx
 │   ├── limpiar_lista_proveedor.py      # limpia una lista de precios cruda de un proveedor
-│   ├── generar_planilla_stock_proveedores.py  # genera la planilla de stock por proveedor
-│   ├── cargar_stock_por_proveedor.py   # importa esa planilla a la base
+│   ├── generar_planilla_stock_proveedores.py  # genera la planilla de stock EN BLANCO,
+│   │                                     una hoja por proveedor, para completar a mano
+│   ├── armar_planilla_stock.py         # genera la planilla de stock YA COMPLETA con el
+│   │                                     catálogo de los 14 proveedores (202.381 filas)
+│   ├── clasificar_repuestos.py         # decide rubro/subrubro de un repuesto por su
+│   │                                     descripción; lo usa el script de arriba
+│   ├── cargar_stock_por_proveedor.py   # importa cualquiera de esas dos planillas a la
+│   │                                     base (solo las filas con cantidad completada)
 │   ├── extraer_catalogo_referencia.py  # separa listas de precios completas (no stock real)
 │   │                                     de esa misma planilla, sin tocar la base
 │   ├── matchear_productos_proveedores.py  # puebla producto_proveedor cruzando listas de
@@ -1625,7 +1802,9 @@ frenos_embragues_app/
 │
 ├── plantillas/                # Excels que completa el negocio a mano
 │   ├── Plantilla_Carga_Datos.xlsx           # carga inicial de datos reales
-│   └── Planilla_Stock_Por_Proveedor.xlsx    # carga de stock real por proveedor
+│   ├── Planilla_Stock_Por_Proveedor.xlsx    # ídem, en blanco, una hoja por proveedor
+│   └── Planilla_Stock_Completa.xlsx         # el catálogo de los 14 proveedores ya
+│                                              clasificado: solo falta la cantidad
 │
 ├── listas_proveedores/        # listas de precios de proveedores (datos del
 │                                 negocio, no se suben al repositorio)
@@ -1702,8 +1881,14 @@ Orden acordado con Celes (actualizado 04/08/2026):
    `access_token` (no es algo que se pueda hacer en nombre del negocio).
 4. **Cargar datos reales**: ya está la planilla y el importador. Los **13
    proveedores reales ya están** (`scripts/seed_datos_prueba.py`, corriéndolo
-   con `--solo-proveedores` se cargan sin datos de prueba). Falta que el
-   hermano complete clientes, productos y el stock real.
+   con `--solo-proveedores` se cargan sin datos de prueba). El **catálogo de
+   productos de los 14 proveedores también está**, clasificado y con precio
+   sugerido, en `plantillas/Planilla_Stock_Completa.xlsx` (ver la sección
+   dedicada más arriba). Falta el paso humano: que alguien del negocio
+   complete la columna "Cantidad en stock" con lo que hay en el estante, y
+   después `python scripts/cargar_stock_por_proveedor.py
+   plantillas/Planilla_Stock_Completa.xlsx`. Faltan también los clientes
+   reales, e Icepar y RM todavía no mandaron su lista de precios.
 5. ~~Tienda online propia~~ (reemplaza la idea de integrar Tiendanube) —
    **código listo**, ver la sección dedicada más abajo. Falta lo mismo que
    con AFIP: que el negocio cree su cuenta de Mercado Pago y, para probar el

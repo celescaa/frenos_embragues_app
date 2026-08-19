@@ -21,6 +21,12 @@ listas_proveedores/
 # costos y cantidades reales del negocio)
 plantillas/Planilla_Stock_Por_Proveedor.xlsx
 
+# Planilla de stock ya completa con el catálogo de los 14 proveedores: son
+# 14 MB de costos reales de cada proveedor. La regenera
+# scripts/armar_planilla_stock.py desde las listas de precios, que tampoco
+# están en el repositorio (ver listas_proveedores/ más arriba).
+plantillas/Planilla_Stock_Completa.xlsx
+
 # Planilla de carga de datos: se completa a mano con clientes/productos/
 # proveedores/ventas reales del negocio, no es solo una plantilla en blanco.
 plantillas/Plantilla_Carga_Datos.xlsx
