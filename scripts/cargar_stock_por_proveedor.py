@@ -24,8 +24,15 @@ local trabaja una fracción; la cantidad escrita a mano es lo que distingue
 "esto lo tenemos" de "esto el proveedor lo vende". Una fila sin cantidad se
 saltea, y el resumen final dice cuántas fueron.
 
+Cada fila pasa por scripts/nomenclatura.py antes de entrar: el nombre queda
+como PIEZA + MARCA + [ESPECIFICACION] + CODIGO, la marca pierde el ruido
+comercial y el modelo queda en mayúsculas sin acentos. Es la red de seguridad
+para lo que se tipee a mano directo en la planilla.
+
 Uso (desde la raíz del proyecto): python scripts/cargar_stock_por_proveedor.py [archivo.xlsx]
   Por defecto lee plantillas/Planilla_Stock_Por_Proveedor.xlsx.
+  Con --revisar no toca la base: muestra el antes y el después de cada fila
+  que se cargaría, para poder mirarlo antes de que pase.
 """
 import sys
 import os
@@ -41,6 +48,7 @@ from core import database as db
 # (por ejemplo desde tests/test_scripts.py) sin depender de que scripts/ esté
 # en sys.path -- algo que solo pasa solo cuando se corre como script suelto.
 from scripts import importar_datos as idatos
+from scripts import nomenclatura as nom
 
 ARCHIVO_POR_DEFECTO = "plantillas/Planilla_Stock_Por_Proveedor.xlsx"
 NOMBRE_PROVEEDOR_SIN_IDENTIFICAR = "Proveedor sin identificar (revisar)"
@@ -92,7 +100,7 @@ def _guardar_cotizacion(conn, producto_id, proveedor_id, precio_costo, codigo_pr
     )
 
 
-def _procesar_hoja(ws, proveedor_id, proveedor_nombre, conn, resumen):
+def _procesar_hoja(ws, proveedor_id, proveedor_nombre, conn, resumen, revisar=False):
     for fila in _filas_de_hoja(ws):
         cargar = idatos._limpiar(fila[0]).upper()
         if cargar == "NO":
@@ -114,9 +122,40 @@ def _procesar_hoja(ws, proveedor_id, proveedor_nombre, conn, resumen):
             continue
 
         codigo = idatos._limpiar(fila[1]) or None
-        categoria = idatos._normalizar_categoria(fila[2])
-        marca = idatos._limpiar(fila[4])
-        modelo_compatible = idatos._limpiar(fila[5])
+
+        # La nomenclatura corre acá, sobre las filas que de verdad se cargan y
+        # no sobre las 202.381 de la planilla: la cantidad escrita a mano ya
+        # descartó el resto unas líneas más arriba.
+        crudo = {
+            "nombre": nombre,
+            "marca": idatos._limpiar(fila[4]),
+            "rubro": idatos._limpiar(fila[2]),
+            "subrubro": idatos._limpiar(fila[11]) if len(fila) > 11 else "",
+            "modelo": idatos._limpiar(fila[5]),
+        }
+        limpio = nom.normalizar_fila(
+            proveedor=proveedor_nombre, descripcion=crudo["nombre"],
+            marca=crudo["marca"], rubro=crudo["rubro"],
+            subrubro=crudo["subrubro"], modelo=crudo["modelo"],
+            codigo=codigo or "",
+        )
+        if limpio["revisar"]:
+            resumen["avisos"].append(f"'{nombre}' ({proveedor_nombre}): {limpio['revisar']}")
+
+        if revisar:
+            resumen["revision"].append({
+                "proveedor": proveedor_nombre, "codigo": codigo or "",
+                "antes": crudo, "ahora": limpio,
+            })
+            continue
+
+        nombre = limpio["nombre"]
+        marca = limpio["marca"]
+        modelo_compatible = limpio["modelo"]
+        # El rubro ya viene resuelto contra la taxonomía. Si el módulo no lo
+        # pudo resolver, _normalizar_categoria lo manda al cajón de sastre
+        # como siempre.
+        categoria = idatos._normalizar_categoria(limpio["rubro"])
         precio_costo = idatos._numero(fila[6])
         precio_venta = idatos._numero(fila[7])
         stock_actual = idatos._numero(fila[8], entero=True)
@@ -125,8 +164,9 @@ def _procesar_hoja(ws, proveedor_id, proveedor_nombre, conn, resumen):
         # La columna 12 (subcategoría) existe en la planilla desde que se
         # sumaron las subcategorías (06/08/2026) pero este importador nunca la
         # leía: los productos entraban con el rubro cargado y el subrubro
-        # vacío, sin que nada avisara.
-        subcategoria = idatos._limpiar(fila[11]) if len(fila) > 11 else ""
+        # vacío, sin que nada avisara. Ahora sale del módulo de nomenclatura,
+        # que además la resuelve cuando el proveedor no la manda.
+        subcategoria = limpio["subrubro"]
 
         if not precio_venta:
             resumen["avisos"].append(f"'{nombre}' ({proveedor_nombre}): sin precio de venta, revisalo a mano.")
@@ -194,16 +234,20 @@ def _procesar_hoja(ws, proveedor_id, proveedor_nombre, conn, resumen):
         _guardar_cotizacion(conn, producto_id, proveedor_id, precio_costo, codigo)
 
 
-def main():
-    if len(sys.argv) > 1 and sys.argv[1] in ("-h", "--help"):
-        print(__doc__)
-        return
-    archivo = sys.argv[1] if len(sys.argv) > 1 else ARCHIVO_POR_DEFECTO
+def importar(archivo=ARCHIVO_POR_DEFECTO, revisar=False):
+    """Carga la planilla y devuelve el resumen.
+
+    Con `revisar=True` NO abre la base: recorre las mismas filas y deja en
+    `resumen["revision"]` el antes y el después de cada una. Sirve para mirar
+    qué haría la nomenclatura antes de que lo haga, y es lo que permite
+    testear esto sin Postgres levantado.
+    """
     wb = load_workbook(archivo, data_only=True)
-    conn = db.get_connection()
+    conn = None if revisar else db.get_connection()
 
     resumen = {"proveedores_nuevos": 0, "productos_nuevos": 0, "productos_actualizados": 0,
-               "sin_cantidad": 0, "sin_identificar": 0, "cotizaciones": 0, "avisos": []}
+               "sin_cantidad": 0, "sin_identificar": 0, "cotizaciones": 0,
+               "avisos": [], "revision": []}
 
     for nombre_hoja in wb.sheetnames:
         if nombre_hoja == "INSTRUCCIONES":
@@ -215,15 +259,22 @@ def main():
         else:
             proveedor_nombre = nombre_hoja
 
-        proveedor_id = obtener_o_crear_proveedor(conn, proveedor_nombre, resumen)
+        # En modo revisión no se crea el proveedor: crearlo ya sería tocar la
+        # base, que es exactamente lo que este modo promete no hacer.
+        proveedor_id = None if revisar else obtener_o_crear_proveedor(
+            conn, proveedor_nombre, resumen)
         antes = resumen["productos_nuevos"] + resumen["productos_actualizados"]
-        _procesar_hoja(ws, proveedor_id, proveedor_nombre, conn, resumen)
+        _procesar_hoja(ws, proveedor_id, proveedor_nombre, conn, resumen, revisar)
         cargados = resumen["productos_nuevos"] + resumen["productos_actualizados"] - antes
         if cargados:
             print(f"{proveedor_nombre}: {cargados} productos")
         if proveedor_nombre == NOMBRE_PROVEEDOR_SIN_IDENTIFICAR:
             resumen["sin_identificar"] = cargados
-        conn.commit()
+        if not revisar:
+            conn.commit()
+
+    if revisar:
+        return resumen
 
     # La tabla `marcas` (la que alimenta el desplegable de sugerencias de la
     # ficha de producto) se llena sola al guardar un producto desde la
@@ -235,6 +286,45 @@ def main():
     conn.commit()
 
     conn.close()
+    return resumen
+
+
+def _imprimir_revision(resumen):
+    """Muestra el antes y el después sin haber tocado la base."""
+    filas = resumen["revision"]
+    print()
+    print("=" * 62)
+    print(f"  SIMULACION: no se tocó la base. {len(filas)} filas se cargarían.")
+    print("=" * 62)
+    for f in filas:
+        print(f"\n  {f['codigo']} ({f['proveedor']})")
+        print(f"    antes  {f['antes']['nombre']!r}")
+        print(f"           [{f['antes']['rubro']} / {f['antes']['subrubro'] or '-'}]"
+              f"  marca={f['antes']['marca']!r}")
+        print(f"    ahora  {f['ahora']['nombre']!r}")
+        print(f"           [{f['ahora']['rubro']} / {f['ahora']['subrubro'] or '-'}]"
+              f"  marca={f['ahora']['marca']!r}")
+    repetidos = len(filas) - len({f["ahora"]["nombre"] for f in filas})
+    print(f"\n  Filas salteadas por no tener cantidad: {resumen['sin_cantidad']}")
+    print(f"  Nombres repetidos entre las filas que entran: {repetidos}")
+    if resumen["avisos"]:
+        print(f"  Avisos ({len(resumen['avisos'])}):")
+        for aviso in resumen["avisos"]:
+            print(f"   - {aviso}")
+
+
+def main():
+    if len(sys.argv) > 1 and sys.argv[1] in ("-h", "--help"):
+        print(__doc__)
+        return
+    revisar = "--revisar" in sys.argv
+    argumentos = [a for a in sys.argv[1:] if not a.startswith("--")]
+    archivo = argumentos[0] if argumentos else ARCHIVO_POR_DEFECTO
+
+    resumen = importar(archivo, revisar=revisar)
+    if revisar:
+        _imprimir_revision(resumen)
+        return
 
     print()
     print("=" * 52)
