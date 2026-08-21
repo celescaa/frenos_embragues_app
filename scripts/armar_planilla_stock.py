@@ -44,6 +44,7 @@ from openpyxl.utils import get_column_letter
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 from scripts import clasificar_repuestos as clasif
+from scripts import nomenclatura as nom
 from scripts.importar_datos import _limpiar, _numero
 
 CARPETA_LISTAS_POR_DEFECTO = os.path.expanduser(
@@ -377,21 +378,31 @@ def escribir_hoja(wb, nombre, productos, resumen):
         venta = precio_venta_sugerido(costo)
         if not costo:
             resumen["sin_costo"] += 1
-        if p["categoria"] == clasif.VARIOS:
+        # La nomenclatura se aplica ya al generar, así la planilla nace
+        # prolija y no necesita pasar después por normalizar_planilla_stock.py
+        # (que existe para las planillas que ya están en manos del negocio).
+        limpio = nom.normalizar_fila(
+            proveedor=ws.title, descripcion=p["nombre"], marca=p["marca"],
+            rubro=p["categoria"], subrubro=p["subcategoria"],
+            modelo=p["modelo"], codigo=p["codigo"] or "",
+        )
+        # Cuenta el rubro que de verdad se escribe, no el que traía antes de
+        # normalizar.
+        if limpio["rubro"] == clasif.VARIOS:
             resumen["en_varios"] += 1
         ws.append([
             "SI",
             p["codigo"] or None,
-            p["categoria"],
-            p["nombre"],
-            p["marca"] or None,
-            p["modelo"] or None,
+            limpio["rubro"],
+            limpio["nombre"],
+            limpio["marca"] or None,
+            limpio["modelo"] or None,
             float(costo) if costo else None,
             float(venta) if venta else None,
             None,                       # Cantidad en stock: lo completa el negocio
             STOCK_MINIMO_POR_DEFECTO,
             None,                       # Código de barras: ninguna lista lo trae
-            p["subcategoria"],
+            limpio["subrubro"],
         ])
         resumen["filas"] += 1
     return ws
