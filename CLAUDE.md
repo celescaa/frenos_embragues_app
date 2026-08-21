@@ -1875,7 +1875,7 @@ sobre las mismas 25 filas.
 
 ### Qué se probó
 
-Suite completa en verde (328 tests). Y la carga real de las 25 filas contra el
+Suite completa en verde (327 tests). Y la carga real de las 25 filas contra el
 Postgres local: las 25 quedaron en `Motor / Bomba de agua` (antes las 24 de
 Rodamitre caían en `Varios` sin subrubro, porque el rubro `Bomba` que manda el
 proveedor no existe en la taxonomía v3), **ningún nombre repetido**, y las
