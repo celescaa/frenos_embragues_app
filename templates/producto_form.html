@@ -15,7 +15,9 @@
       </div>
       <div class="col-md-8 mb-3">
         <label class="form-label">Nombre *</label>
-        <input type="text" name="nombre" class="form-control" required value="{{ producto.nombre if producto else '' }}">
+        {# La mayúscula visual es solo eso: lo que garantiza lo que se guarda es
+           mayusculas_sin_acentos() del lado del servidor (core/app.py). #}
+        <input type="text" name="nombre" class="form-control" style="text-transform: uppercase" required value="{{ producto.nombre if producto else '' }}">
       </div>
     </div>
     <div class="row">
@@ -53,14 +55,14 @@
     <div class="row">
       <div class="col-md-6 mb-3">
         <label class="form-label">Marca</label>
-        <input type="text" name="marca" class="form-control" list="marcasCargadas" value="{{ producto.marca if producto else '' }}">
+        <input type="text" name="marca" class="form-control" style="text-transform: uppercase" list="marcasCargadas" value="{{ producto.marca if producto else '' }}">
         <datalist id="marcasCargadas">
           {% for m in marcas %}<option value="{{ m }}"></option>{% endfor %}
         </datalist>
       </div>
       <div class="col-md-6 mb-3">
         <label class="form-label">Modelo compatible</label>
-        <input type="text" name="modelo_compatible" class="form-control" value="{{ producto.modelo_compatible if producto else '' }}">
+        <input type="text" name="modelo_compatible" class="form-control" style="text-transform: uppercase" value="{{ producto.modelo_compatible if producto else '' }}">
       </div>
     </div>
     <div class="row">

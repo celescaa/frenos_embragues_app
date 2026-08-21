@@ -79,7 +79,9 @@ def test_la_marca_escrita_queda_disponible_para_el_filtro(client, db_conn, autos
     client.post("/productos/nuevo", data={**DATOS_BASE, "marca": "Fric-Rot"},
                 follow_redirects=True)
     marcas = [m["nombre"] for m in db_conn.execute("SELECT nombre FROM marcas")]
-    assert "Fric-Rot" in marcas
+    # En mayúsculas porque la ficha guarda la marca normalizada
+    # (mayusculas_sin_acentos, 21/08/2026).
+    assert "FRIC-ROT" in marcas
 
 
 def test_la_marca_no_se_duplica_por_mayusculas(client, db_conn, autos):

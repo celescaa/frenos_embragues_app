@@ -86,8 +86,10 @@ def test_precio_se_guarda_como_decimal_exacto(client, db_conn):
     })
     assert respuesta.status_code < 400
     fila = db_conn.execute(
+        # En mayúsculas porque la ficha de producto guarda el nombre
+        # normalizado (mayusculas_sin_acentos, 21/08/2026).
         "SELECT precio_costo, precio_venta FROM productos WHERE nombre = %s",
-        ("Producto con decimales",),
+        ("PRODUCTO CON DECIMALES",),
     ).fetchone()
     assert fila is not None
     assert fila["precio_costo"] == Decimal("1234.56")

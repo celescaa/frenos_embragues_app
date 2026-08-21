@@ -20,6 +20,9 @@ from werkzeug.utils import secure_filename
 from dotenv import load_dotenv
 from urllib.parse import urlparse
 from . import database as db
+# El nombre, la marca y el modelo se guardan en mayúsculas sin acentos: el
+# text-transform del formulario es solo visual y no cambia lo que se manda.
+from scripts import nomenclatura as nom
 from . import almacenamiento
 from . import supabase_auth
 from . import facturacion_afip
@@ -1080,11 +1083,14 @@ def productos_nuevo():
                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s) RETURNING id""",
             (
                 request.form.get("codigo") or None,
-                request.form["nombre"],
+                nom.mayusculas_sin_acentos(request.form["nombre"]),
+                # categoria y subcategoria NO se normalizan: facetas_productos()
+                # las agrupa crudas y 'MOTOR' saldría como un rubro distinto de
+                # 'Motor' en el filtro de /productos.
                 request.form["categoria"],
                 request.form.get("subcategoria") or None,
-                request.form.get("marca", ""),
-                request.form.get("modelo_compatible", ""),
+                nom.mayusculas_sin_acentos(request.form.get("marca", "")),
+                nom.mayusculas_sin_acentos(request.form.get("modelo_compatible", "")),
                 a_decimal(request.form.get("precio_costo")),
                 a_decimal(request.form.get("precio_venta")),
                 int(request.form.get("stock_actual") or 0),
@@ -1132,11 +1138,14 @@ def productos_editar(producto_id):
                codigo_barras=%s WHERE id=%s""",
             (
                 request.form.get("codigo") or None,
-                request.form["nombre"],
+                nom.mayusculas_sin_acentos(request.form["nombre"]),
+                # categoria y subcategoria NO se normalizan: facetas_productos()
+                # las agrupa crudas y 'MOTOR' saldría como un rubro distinto de
+                # 'Motor' en el filtro de /productos.
                 request.form["categoria"],
                 request.form.get("subcategoria") or None,
-                request.form.get("marca", ""),
-                request.form.get("modelo_compatible", ""),
+                nom.mayusculas_sin_acentos(request.form.get("marca", "")),
+                nom.mayusculas_sin_acentos(request.form.get("modelo_compatible", "")),
                 a_decimal(request.form.get("precio_costo")),
                 a_decimal(request.form.get("precio_venta")),
                 int(request.form.get("stock_actual") or 0),
@@ -1799,7 +1808,7 @@ def api_productos_nuevo():
     factura importada (vía modal), para no tener que salir a /productos/nuevo
     y perder la compra que se está cargando. Arranca con stock 0: la propia
     compra que se está registrando le suma la cantidad comprada al guardar."""
-    nombre = request.form.get("nombre", "").strip()
+    nombre = nom.mayusculas_sin_acentos(request.form.get("nombre", ""))
     if not nombre:
         return jsonify({"ok": False, "error": "El nombre es obligatorio."}), 400
 
@@ -1808,7 +1817,7 @@ def api_productos_nuevo():
     if categoria not in db.obtener_categorias():
         categoria = db.CATEGORIA_CAJON_DE_SASTRE
     subcategoria = request.form.get("subcategoria", "").strip() or None
-    marca = request.form.get("marca", "").strip() or None
+    marca = nom.mayusculas_sin_acentos(request.form.get("marca", "")) or None
     precio_costo = a_decimal(request.form.get("precio_costo"))
     precio_venta = a_decimal(request.form.get("precio_venta"))
     stock_minimo = int(request.form.get("stock_minimo") or 2)
