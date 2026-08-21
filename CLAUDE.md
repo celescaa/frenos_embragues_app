@@ -1759,6 +1759,153 @@ proveedores — o sea el comparador de precios con datos de verdad.
 **Lo que falta es humano**: que alguien del negocio complete la columna
 "Cantidad en stock" con lo que hay en el estante.
 
+## Nomenclatura de productos (21/08/2026)
+
+Alguien del negocio hizo la **primera carga real de stock**: completó la
+columna "Cantidad en stock" de 25 filas de
+`plantillas/Planilla_Stock_Completa.xlsx` (24 bombas de agua VMG de Rodamitre
+y 1 SKF de Roncal). Celes miró el resultado y pidió una nomenclatura que deje
+las descripciones limpias, que la marca y el modelo terminen en su columna, y
+todo en mayúscula.
+
+Spec: `docs/superpowers/specs/2026-08-21-nomenclatura-productos-design.md`.
+Plan: `docs/superpowers/plans/2026-08-21-nomenclatura-productos.md`.
+
+### La regla
+
+```
+NOMBRE = PIEZA + MARCA + [ESPECIFICACIÓN] + CÓDIGO
+```
+
+En **MAYÚSCULAS y sin acentos**: `BOMBA DE AGUA VMG POLEA 19 DIENTES BA446`.
+
+- **PIEZA** sale de `PIEZA_POR_SUBRUBRO`, derivada del subrubro de la
+  taxonomía v3. Es lo que hace que todas las bombas de agua se llamen igual.
+- **ESPECIFICACIÓN** es lo que diferencia dos piezas iguales (`POLEA 19
+  DIENTES`, `TURBINA 70 MM`, `REFORZADA`) y **se extrae del modelo**, donde
+  los proveedores la mezclan con los autos. Si no hay ninguna, se usan hasta
+  2 marcas de auto: sin eso, 14 de las 25 filas quedaban con el nombre
+  idéntico `BOMBA DE AGUA VMG`.
+- **El código va siempre al final**, aunque el nombre ya sea único, para que
+  el formato sea parejo.
+- **El auto NO va en el nombre.** Va en `modelo_compatible`, que el buscador
+  ya mira (`TEXTO_PRODUCTO_SQL`): buscar "palio 1.6" lo encuentra igual, y
+  con 15 autos por bomba meterlos en el nombre lo volvería ilegible.
+
+### ⚠️ Rubro y subrubro NUNCA se pasan a mayúscula
+
+Es el gotcha que más fácil se revierte "por prolijidad".
+`db.facetas_productos()` agrupa las dimensiones `categoria` y `subcategoria`
+por la **columna cruda** — a diferencia de `marca`, que agrupa por
+`texto_busqueda()`. Pasarlas a mayúscula haría que `MOTOR` y `Motor`
+aparecieran como **dos rubros distintos** en el filtro de `/productos`, cada
+uno con su contador. Hay un test por cada lado (módulo y formulario) que lo
+cuida.
+
+Pasó de verdad al cablear esto: el primer intento normalizó por error el
+nombre en `categorias_nueva()`, o sea el alta de categorías. Quedó
+`test_crear_una_categoria_no_la_pasa_a_mayuscula` como regresión.
+
+### Las marcas de auto se corrigen solas, los modelos no
+
+Las **marcas** (`MARCAS_AUTO`: `Peuget`→`PEUGEOT`, `Mbeanz`→`MERCEDES BENZ`,
+`fort`→`FORD`) son un conjunto chico y cerrado, verificable de una vez: se
+aplican siempre.
+
+Los **modelos** son una lista abierta y sólo se aplica lo confirmado a mano
+(`ALIAS_MODELO`). El resto se **propone y no se aplica**. Los números que lo
+justifican, medidos sobre las 25 filas reales: de 23 palabras sospechosas el
+parecido acierta 12 y se equivoca en 6.
+
+| Propone | Realmente es |
+|---|---|
+| `DASTER` → MASTER | **DUSTER** (los dos son Renault) |
+| `LAGAN` → LOGAN | **LAGUNA** |
+| `MEGAM` → OMEGA | **MEGANE** |
+| `CAPTUS` → CAPTUR | **CACTUS** (el Captur es Renault, éste es un Citroën) |
+| `PRIMASTER` → MASTER | **PRIMASTAR** (es Nissan) |
+| `REFOR` → REFORMA | **REFORZADA** |
+
+Todos los pares errados son autos que existen los dos, así que el error no se
+nota mirando el resultado: se nota cuando el cliente vuelve con la pieza que
+no era. Además, `MOBI` (802 apariciones), `MITO` (536) y `TORO` (1003) son
+autos reales que casi se "corrigen": los salva **únicamente** el filtro de
+frecuencia (`APARICIONES_PALABRA_CONFIABLE = 300`).
+
+El vocabulario sale de los datos reales, no de una lista escrita a mano:
+sobre las 202.381 filas de la planilla hay 10.306 palabras distintas y 635
+aparecen 300 veces o más. `ALIAS_MODELO` crece con lo que una persona tilda
+en la hoja `REVISAR` que genera `normalizar_planilla_stock.py`.
+
+### Gotcha de orden: separadores antes que alias
+
+`normalizar_modelo()` normaliza los separadores **antes** de aplicar
+`ALIAS_MODELO`. Al revés —que fue la primera versión— `Parnert-208` es una
+sola palabra y el alias no la agarra nunca. Bajó las propuestas de 17 a 11
+sobre las mismas 25 filas.
+
+### Mayúscula al tipear: dos capas, las dos necesarias
+
+- `style="text-transform: uppercase"` en los inputs de `producto_form.html`
+  (nombre, marca, modelo). **Es solo visual**: el valor que el navegador manda
+  sigue siendo lo que la persona tipeó.
+- `nom.mayusculas_sin_acentos()` del lado del servidor, en `productos_nuevo()`,
+  `productos_editar()` y `api_productos_nuevo()`. Es lo único que garantiza lo
+  que queda en la base.
+
+### Archivos
+
+- **`scripts/nomenclatura.py`** — texto puro, no importa `core.database`
+  (hermano de `clasificar_repuestos.py`). `verificar_taxonomia()` con test
+  propio: si una migración renombra un subrubro, salta ahí.
+- **`scripts/normalizar_planilla_stock.py`** — limpia **la planilla que el
+  negocio ya tiene** en una copia nueva. No se regenera con
+  `armar_planilla_stock.py` a propósito: eso borraría las cantidades cargadas
+  a mano, que son el único trabajo humano que no se puede reponer.
+  Uso: `python scripts/normalizar_planilla_stock.py <archivo.xlsx> [salida.xlsx]`
+- **`scripts/cargar_stock_por_proveedor.py`** — aplica el módulo al cargar.
+  Se extrajo `importar(archivo, revisar=False)` de `main()`, que hasta ahora
+  hacía todo junto. Con **`--revisar`** no abre la base: muestra el antes y el
+  después de cada fila. Tiene test que monkeypatchea `get_connection` para que
+  explote si alguien la llama, porque si eso se rompe `--revisar` deja de ser
+  seguro para correr contra producción, que es el único motivo por el que
+  existe.
+- **`scripts/armar_planilla_stock.py`** — aplica lo mismo al generar, así la
+  próxima planilla nace prolija.
+
+### Qué se probó
+
+Suite completa en verde (328 tests). Y la carga real de las 25 filas contra el
+Postgres local: las 25 quedaron en `Motor / Bomba de agua` (antes las 24 de
+Rodamitre caían en `Varios` sin subrubro, porque el rubro `Bomba` que manda el
+proveedor no existe en la taxonomía v3), **ningún nombre repetido**, y las
+marcas sembradas para el filtro.
+
+La búsqueda, contra la base cargada:
+
+| Búsqueda | Antes | Ahora |
+|---|---|---|
+| `bomba fiat` | **0** | 5 |
+| `bomba` | 1 | 25 |
+| `bomba agua peugeot` | 0 | 6 |
+| `partner` | 0 | 3 |
+| `regatta` | 0 | 1 |
+| `bomba freno` | 0 | **0** (ninguna es de freno; si diera resultados, algo estaría mal clasificado) |
+
+`bomba fiat` daba **cero** antes, y no era culpa del buscador: la palabra
+"bomba" no aparecía en ninguna columna de la fila. El nombre decía `VMG
+BA013`, la marca `VMG` y el modelo `Fiat 128`.
+
+**Lo que falta**: `siena` sigue dando cero porque la fila BA691 dice `sena` y
+ese typo está en la hoja `REVISAR` sin confirmar. Es exactamente lo que se
+gana completando esa columna SI/NO.
+
+**Flaky preexistente, sin relación con esto**:
+`tests/test_auth_supabase.py::test_el_error_no_revela_si_el_usuario_existe`
+falla a veces corriendo la suite entera y pasa aislado — la suite golpea
+Supabase Auth y salta su rate limit.
+
+
 ## Estructura
 
 ```
