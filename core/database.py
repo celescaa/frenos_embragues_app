@@ -252,6 +252,16 @@ TEXTO_VEHICULOS_SQL = """EXISTS (
 )"""
 
 
+# Y lo mismo para el proveedor del producto: en el mostrador se pregunta
+# "¿qué tengo de Zerbini?" tan seguido como "¿qué tengo para Palio?", y el
+# nombre del proveedor no está en ningún campo de texto del producto.
+TEXTO_PROVEEDOR_SQL = """EXISTS (
+    SELECT 1 FROM proveedores pr
+    WHERE pr.id = p.proveedor_id
+      AND texto_busqueda(pr.nombre) LIKE '%%' || texto_busqueda(%s) || '%%'
+)"""
+
+
 # Parecido mínimo (0 a 1) para dar por buena una palabra mal escrita.
 # Medido contra casos reales de mostrador: "bugia" contra "bujia ngk ..." da
 # 0.333 y "enbrague" contra "kit embrague ..." da 0.556, mientras que una
@@ -268,7 +278,7 @@ LARGO_MINIMO_PARECIDO = 4
 
 def _condiciones_busqueda(q=None, categoria=None, subcategoria=None, marca=None,
                           vehiculo_id=None, solo_con_stock=False, excluir=(),
-                          difuso=()):
+                          difuso=(), proveedor_id=None):
     """Arma el WHERE compartido por buscar_productos() y facetas_productos().
 
     `excluir` nombra filtros a NO aplicar: los contadores de cada filtro se
@@ -301,8 +311,9 @@ def _condiciones_busqueda(q=None, categoria=None, subcategoria=None, marca=None,
             # bloque difuso de más abajo.
             "p.codigo_barras = %s",
             TEXTO_VEHICULOS_SQL,
+            TEXTO_PROVEEDOR_SQL,
         ]
-        params += [palabra, palabra, palabra]
+        params += [palabra, palabra, palabra, palabra]
 
         if palabra in difuso:
             # word_similarity() y no similarity(): compara la palabra tipeada
@@ -333,6 +344,13 @@ def _condiciones_busqueda(q=None, categoria=None, subcategoria=None, marca=None,
             "WHERE pv.producto_id = p.id AND pv.vehiculo_id = %s)"
         )
         params.append(vehiculo_id)
+    if proveedor_id and "proveedor_id" not in excluir:
+        # El proveedor de la ficha, que es el que la fila muestra. Las
+        # cotizaciones de otros proveedores para el mismo producto no cuentan:
+        # si contaran, un producto aparecería bajo un proveedor que la
+        # pantalla no nombra en ningún lado.
+        condiciones.append("p.proveedor_id = %s")
+        params.append(proveedor_id)
     if solo_con_stock:
         condiciones.append("p.stock_actual > 0")
 
@@ -341,7 +359,7 @@ def _condiciones_busqueda(q=None, categoria=None, subcategoria=None, marca=None,
 
 def buscar_productos(conn, q=None, categoria=None, subcategoria=None, marca=None,
                      vehiculo_id=None, solo_con_stock=False, limite=None,
-                     difuso=()):
+                     difuso=(), proveedor_id=None):
     """Punto único de búsqueda de productos del sistema.
 
     Antes este criterio estaba escrito tres veces (la pantalla de Stock, el
@@ -354,9 +372,12 @@ def buscar_productos(conn, q=None, categoria=None, subcategoria=None, marca=None
     """
     condiciones, params = _condiciones_busqueda(
         q, categoria, subcategoria, marca, vehiculo_id, solo_con_stock,
-        difuso=difuso,
+        difuso=difuso, proveedor_id=proveedor_id,
     )
-    consulta = "SELECT p.* FROM productos p"
+    consulta = (
+        "SELECT p.*, prov.nombre AS proveedor_nombre FROM productos p "
+        "LEFT JOIN proveedores prov ON prov.id = p.proveedor_id"
+    )
     if condiciones:
         consulta += " WHERE " + " AND ".join(condiciones)
     consulta += " ORDER BY p.categoria, p.nombre"
@@ -388,8 +409,9 @@ def _palabras_a_perdonar(conn, q):
                     WHERE {TEXTO_PRODUCTO_SQL} LIKE '%%' || texto_busqueda(%s) || '%%'
                        OR p.codigo_barras = %s
                        OR {TEXTO_VEHICULOS_SQL}
+                       OR {TEXTO_PROVEEDOR_SQL}
                 ) AS existe""",
-            (palabra, palabra, palabra),
+            (palabra, palabra, palabra, palabra),
         ).fetchone()["existe"]
         if not existe:
             a_perdonar.add(palabra)
@@ -466,14 +488,15 @@ def sugerencias_busqueda(conn, q, limite=5):
     return [f["nombre"] for f in filas]
 
 
-# Las tres dimensiones que llevan contador al lado de cada opción. El auto no
+# Las dimensiones que llevan contador al lado de cada opción. El auto no
 # lleva contador: la lista de vehículos puede ser larga y el contador exigiría
 # una consulta por vehículo cargado.
-DIMENSIONES_FACETAS = ["categoria", "subcategoria", "marca"]
+DIMENSIONES_FACETAS = ["categoria", "subcategoria", "marca", "proveedor_id"]
 
 
 def facetas_productos(conn, q=None, categoria=None, subcategoria=None, marca=None,
-                      vehiculo_id=None, solo_con_stock=False, difuso=()):
+                      vehiculo_id=None, solo_con_stock=False, difuso=(),
+                      proveedor_id=None):
     """Cuántos productos hay en cada opción de cada filtro, para mostrarlo al
     lado (`Frenos (128)`), más el total que cumple TODOS los filtros.
 
@@ -488,7 +511,8 @@ def facetas_productos(conn, q=None, categoria=None, subcategoria=None, marca=Non
     """
     filtros = dict(q=q, categoria=categoria, subcategoria=subcategoria,
                    marca=marca, vehiculo_id=vehiculo_id,
-                   solo_con_stock=solo_con_stock, difuso=difuso)
+                   solo_con_stock=solo_con_stock, difuso=difuso,
+                   proveedor_id=proveedor_id)
 
     condiciones, params = _condiciones_busqueda(**filtros)
     consulta = "SELECT count(*) AS n FROM productos p"
@@ -545,6 +569,37 @@ def obtener_mejor_precio_por_producto(conn, producto_id):
     de arriba), o None si no hay ninguna cargada."""
     cotizaciones = obtener_cotizaciones_producto(conn, producto_id)
     return cotizaciones[0] if cotizaciones else None
+
+
+def obtener_precios_mas_baratos(conn, producto_ids):
+    """Para los productos que tienen cotización de DOS o más proveedores
+    activos, cuál es el más barato: `{producto_id: {"proveedor_id",
+    "proveedor_nombre", "precio_costo"}}`.
+
+    Los que tienen una sola cotización no aparecen, a propósito: con un solo
+    proveedor no hay nada que comparar, y decir "mejor precio" al lado de
+    cada uno era repetir el proveedor que la fila ya muestra.
+
+    Una consulta para toda la lista. /productos llamaba a
+    obtener_mejor_precio_por_producto() una vez por fila -- 200 consultas
+    para dibujar una pantalla.
+    """
+    if not producto_ids:
+        return {}
+    filas = conn.execute(
+        """SELECT DISTINCT ON (pp.producto_id)
+                  pp.producto_id, pp.precio_costo,
+                  pr.id AS proveedor_id, pr.nombre AS proveedor_nombre
+           FROM producto_proveedor pp
+           JOIN proveedores pr ON pr.id = pp.proveedor_id AND pr.activo = true
+           WHERE pp.producto_id = ANY(%s)
+             AND (SELECT count(*) FROM producto_proveedor otra
+                  JOIN proveedores pro ON pro.id = otra.proveedor_id AND pro.activo = true
+                  WHERE otra.producto_id = pp.producto_id) >= 2
+           ORDER BY pp.producto_id, pp.precio_costo, pr.nombre""",
+        (list(producto_ids),),
+    ).fetchall()
+    return {f["producto_id"]: f for f in filas}
 
 
 def _generar_password_temporal(largo=10):

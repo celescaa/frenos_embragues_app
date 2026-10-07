@@ -84,3 +84,19 @@ def test_marca_en_distinta_capitalizacion_da_una_sola_opcion_de_faceta(db_conn):
     assert cantidad == 2
     # Y filtrar usando esa misma opción devuelve los dos productos.
     assert len(db.buscar_productos(db_conn, marca=nombre_faceta)) == 2
+
+
+def test_cuenta_por_proveedor_y_no_se_filtra_a_si_mismo(db_conn):
+    ids = [
+        db_conn.execute("INSERT INTO proveedores (nombre) VALUES (%s) RETURNING id", (n,)).fetchone()["id"]
+        for n in ("Zerbini", "Rodamitre")
+    ]
+    for nombre, proveedor_id in [("Parrilla", ids[0]), ("Rodamiento", ids[0]), ("Rotula", ids[1])]:
+        db_conn.execute(
+            """INSERT INTO productos (nombre, categoria, precio_costo, precio_venta, proveedor_id)
+               VALUES (%s, 'Suspensión', 100, 130, %s)""",
+            (nombre, proveedor_id),
+        )
+    facetas = db.facetas_productos(db_conn, proveedor_id=ids[0])
+    assert facetas["proveedor_id"] == {ids[0]: 2, ids[1]: 1}
+    assert facetas["total"] == 2

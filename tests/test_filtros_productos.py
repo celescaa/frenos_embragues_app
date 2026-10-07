@@ -209,3 +209,74 @@ def test_la_x_del_rubro_saca_tambien_el_subrubro(client, catalogo):
     subcategoria_qs = _query(subcategoria_href)
     assert "subcategoria" not in subcategoria_qs
     assert subcategoria_qs.get("categoria") == ["Frenos"]
+
+
+# --- Proveedor y el listado compacto -----------------------------------------
+
+@pytest.fixture
+def con_proveedores(db_conn, catalogo):
+    """La pastilla es de Zerbini y el kit de embrague de Rodamitre."""
+    ids = {}
+    for nombre, producto in [("Zerbini", "Pastilla delantera"), ("Rodamitre", "Kit de embrague")]:
+        ids[nombre] = db_conn.execute(
+            "INSERT INTO proveedores (nombre) VALUES (%s) RETURNING id", (nombre,)
+        ).fetchone()["id"]
+        db_conn.execute(
+            "UPDATE productos SET proveedor_id = %s WHERE nombre = %s", (ids[nombre], producto)
+        )
+    db_conn.commit()
+    return ids
+
+
+def test_filtra_por_proveedor(client, con_proveedores):
+    texto = client.get(f"/productos?proveedor_id={con_proveedores['Zerbini']}").data.decode()
+    assert "Pastilla delantera" in texto
+    assert "Kit de embrague" not in texto
+
+
+def test_el_desplegable_de_proveedor_lleva_contador(client, con_proveedores):
+    texto = client.get("/productos").data.decode()
+    assert re.search(r"Zerbini\s*\(1\)", texto)
+    assert re.search(r"Rodamitre\s*\(1\)", texto)
+
+
+def test_la_x_del_proveedor_saca_solo_ese_filtro(client, con_proveedores):
+    pagina = client.get(
+        f"/productos?proveedor_id={con_proveedores['Zerbini']}&categoria=Frenos"
+    ).data.decode()
+    consultas = [_query(h) for h in _hrefs_de_los_x(pagina)]
+    assert {"categoria": ["Frenos"]} in consultas, "la X del proveedor conserva el rubro"
+
+
+def test_un_proveedor_invalido_no_rompe_la_pantalla(client, catalogo):
+    assert client.get("/productos?proveedor_id=abc").status_code == 200
+
+
+def test_buscar_por_nombre_de_proveedor_desde_la_pantalla(client, con_proveedores):
+    texto = client.get("/productos?q=zerbini").data.decode()
+    assert "Pastilla delantera" in texto
+    assert "Kit de embrague" not in texto
+
+
+def test_la_fila_muestra_el_proveedor(client, con_proveedores):
+    """Rodamitre no está filtrado ni elegido: si aparece en una fila es
+    porque la fila nombra a su proveedor."""
+    texto = client.get("/productos?q=embrague").data.decode()
+    assert "Rodamitre" in texto.split('id="productosBody"')[1]
+
+
+def test_mas_barato_solo_aparece_si_hay_dos_cotizaciones(client, con_proveedores, db_conn):
+    pastilla = db_conn.execute("SELECT id FROM productos WHERE nombre = 'Pastilla delantera'").fetchone()["id"]
+    db_conn.execute(
+        "INSERT INTO producto_proveedor (producto_id, proveedor_id, precio_costo) VALUES (%s, %s, 100)",
+        (pastilla, con_proveedores["Zerbini"]),
+    )
+    db_conn.commit()
+    assert "Más barato en" not in client.get("/productos").data.decode()
+
+    db_conn.execute(
+        "INSERT INTO producto_proveedor (producto_id, proveedor_id, precio_costo) VALUES (%s, %s, 80)",
+        (pastilla, con_proveedores["Rodamitre"]),
+    )
+    db_conn.commit()
+    assert "Más barato en Rodamitre" in client.get("/productos").data.decode()

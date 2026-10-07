@@ -1588,6 +1588,50 @@ La migración **sólo agrega**: no borra, no renombra y no toca ningún producto
 Verificada con `npx supabase db reset`, o sea aplicando toda la cadena desde
 cero. Después de esto el seed no deja ningún producto sin subrubro.
 
+## Listado de Stock compacto y filtro por proveedor (07/10/2026)
+
+El mismo día que se cargó el stock real (1.028 productos de 7 proveedores, ver
+`plantillas/Stock_Real_2026-10-07.xlsx`) la pantalla `/productos` dejó de
+leerse: tenía 11 columnas y los datos reales traen nombres de hasta 300
+caracteres (Eine pone todos los autos en la descripción) y otro tanto en
+"compatible con". Cada fila ocupaba seis renglones. Pedido textual de Celes:
+*"la forma de visualizar me parece grotesca, difícil de llevar la mirada"*.
+
+- **De 11 columnas a 5** (Producto, Rubro, Precio, Stock, acciones). El nombre
+  se corta a dos renglones y debajo va un renglón gris con código · marca ·
+  proveedor · auto compatible, cortado a uno. El texto completo queda en el
+  `title`. `table-layout: fixed` con anchos explícitos: sin eso un nombre largo
+  vuelve a empujar las columnas de precio y stock.
+- **Filtro por proveedor**, pedido para poder ver "todo lo que tengo de
+  Zerbini": `proveedor_id` es un filtro más de `buscar_productos()` /
+  `facetas_productos()` (con contador, combinable con los demás), y el
+  buscador de texto también matchea el nombre del proveedor
+  (`TEXTO_PROVEEDOR_SQL`). Filtra por el proveedor **de la ficha**
+  (`productos.proveedor_id`), que es el que la fila muestra, no por las
+  cotizaciones de `producto_proveedor`.
+- `_palabras_a_perdonar()` también mira el proveedor: si no, en "zerbini
+  parrila" la palabra "zerbini" (que no está en ningún campo del producto)
+  se daba por mal escrita y se buscaba por parecido.
+- **"Mejor precio" dejó de ser una columna.** Con una sola cotización por
+  producto —el caso de toda la carga real— repetía el proveedor de la fila.
+  Ahora aparece "Más barato en X" sólo cuando hay cotización de dos o más
+  proveedores activos y el más barato no es el de la ficha.
+  `db.obtener_precios_mas_baratos(conn, ids)` lo resuelve en UNA consulta; la
+  pantalla llamaba a `obtener_mejor_precio_por_producto()` una vez por fila
+  (200 consultas por pantalla).
+- **El stock es un número solo**, en rojo si está en o bajo el mínimo (y el
+  mínimo no es 0, que significa "no controlar", igual que en `/pedidos`). Se
+  fue el fondo amarillo de la fila entera. Ojo: la planilla cargó todo con
+  mínimo 2 (el default), y el 84% del stock real tiene 1 o 2 unidades, así
+  que casi todo sale en rojo hasta que el negocio ajuste los mínimos.
+
+**No se pudo correr la suite**: la Mac de Celes tiene Docker Desktop
+desinstalado (queda la carpeta `/Applications/Docker.app` vacía), así que no
+hay Supabase local. Los tests nuevos están escritos pero sin ejecutar. Lo que
+sí se verificó, contra los datos reales en modo lectura: las consultas nuevas
+y el render de `/productos` con y sin filtros (28 filas de Zerbini, todas de
+60 px de alto, sin desborde horizontal a 1150 px).
+
 ## Planilla única de stock: los 14 proveedores en un archivo (15/08/2026)
 
 Celes pasó las 26 listas de precios que tenía juntadas (`~/Downloads/Lista De

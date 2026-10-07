@@ -6,56 +6,70 @@
   <a href="{{ url_for('productos_nuevo') }}" class="btn btn-primary"><i class="bi bi-plus-lg"></i> Nuevo producto</a>
 </div>
 
-<form class="row g-2 mb-2" method="get" id="filtroForm">
-  <div class="col-md-3">
-    <input type="text" name="q" id="qFiltro" value="{{ q or '' }}" class="form-control" autocomplete="off"
-           placeholder="Buscar: pastilla palio, código, marca...">
+<form class="mb-2" method="get" id="filtroForm">
+  <div class="row g-2 mb-2">
+    <div class="col-md-9">
+      <input type="text" name="q" id="qFiltro" value="{{ q or '' }}" class="form-control" autocomplete="off"
+             placeholder="Buscar: pastilla palio, código, marca, proveedor...">
+    </div>
+    <div class="col-md-3 d-flex align-items-center">
+      <div class="form-check">
+        <input class="form-check-input" type="checkbox" name="solo_con_stock" value="1"
+               id="soloConStock" {{ 'checked' if solo_con_stock }} onchange="this.form.submit()">
+        <label class="form-check-label small" for="soloConStock">Sólo con stock</label>
+      </div>
+    </div>
   </div>
-  <div class="col-md-2">
-    <select name="categoria" id="categoriaFiltro" class="form-select">
-      <option value="">Todos los rubros</option>
-      {% for cat in categorias %}
-        <option value="{{ cat }}" {{ 'selected' if categoria == cat }}>
-          {{ cat }}{% if facetas.categoria.get(cat) %} ({{ facetas.categoria[cat] }}){% endif %}
-        </option>
-      {% endfor %}
-    </select>
-  </div>
-  <div class="col-md-2">
-    <select name="subcategoria" id="subcategoriaFiltro" class="form-select">
-      <option value="">Todos los subrubros</option>
-    </select>
-  </div>
-  <div class="col-md-2">
-    <select name="marca" class="form-select" onchange="this.form.submit()">
-      <option value="">Todas las marcas</option>
-      {% for m in marcas %}
-        <option value="{{ m }}" {{ 'selected' if marca == m }}>
-          {{ m }}{% if facetas.marca.get(m) %} ({{ facetas.marca[m] }}){% endif %}
-        </option>
-      {% endfor %}
-    </select>
-  </div>
-  <div class="col-md-2">
-    <select name="vehiculo_id" class="form-select" onchange="this.form.submit()">
-      <option value="">Todos los autos</option>
-      {% for v in vehiculos %}
-        <option value="{{ v.id }}" {{ 'selected' if vehiculo_id == v.id }}>
-          {{ v.marca_auto }} {{ v.modelo }} {{ v.motor }}
-        </option>
-      {% endfor %}
-    </select>
-  </div>
-  <div class="col-md-1 d-flex align-items-center">
-    <div class="form-check">
-      <input class="form-check-input" type="checkbox" name="solo_con_stock" value="1"
-             id="soloConStock" {{ 'checked' if solo_con_stock }} onchange="this.form.submit()">
-      <label class="form-check-label small" for="soloConStock">Sólo con stock</label>
+  <div class="row g-2">
+    <div class="col-md">
+      <select name="categoria" id="categoriaFiltro" class="form-select">
+        <option value="">Todos los rubros</option>
+        {% for cat in categorias %}
+          <option value="{{ cat }}" {{ 'selected' if categoria == cat }}>
+            {{ cat }}{% if facetas.categoria.get(cat) %} ({{ facetas.categoria[cat] }}){% endif %}
+          </option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md">
+      <select name="subcategoria" id="subcategoriaFiltro" class="form-select">
+        <option value="">Todos los subrubros</option>
+      </select>
+    </div>
+    <div class="col-md">
+      <select name="marca" class="form-select" onchange="this.form.submit()">
+        <option value="">Todas las marcas</option>
+        {% for m in marcas %}
+          <option value="{{ m }}" {{ 'selected' if marca == m }}>
+            {{ m }}{% if facetas.marca.get(m) %} ({{ facetas.marca[m] }}){% endif %}
+          </option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md">
+      <select name="proveedor_id" class="form-select" onchange="this.form.submit()">
+        <option value="">Todos los proveedores</option>
+        {% for pr in proveedores %}
+          <option value="{{ pr.id }}" {{ 'selected' if proveedor_id == pr.id }}>
+            {{ pr.nombre }}{% if facetas.proveedor_id.get(pr.id) %} ({{ facetas.proveedor_id[pr.id] }}){% endif %}
+          </option>
+        {% endfor %}
+      </select>
+    </div>
+    <div class="col-md">
+      <select name="vehiculo_id" class="form-select" onchange="this.form.submit()">
+        <option value="">Todos los autos</option>
+        {% for v in vehiculos %}
+          <option value="{{ v.id }}" {{ 'selected' if vehiculo_id == v.id }}>
+            {{ v.marca_auto }} {{ v.modelo }} {{ v.motor }}
+          </option>
+        {% endfor %}
+      </select>
     </div>
   </div>
 </form>
 
-{% if q or categoria or subcategoria or marca or vehiculo_id or solo_con_stock %}
+{% if q or categoria or subcategoria or marca or proveedor_id or vehiculo_id or solo_con_stock %}
   <div class="mb-3 small">
     <span class="text-muted me-1">Filtrando por:</span>
     {% if q %}
@@ -79,6 +93,13 @@
       <span class="badge bg-secondary me-1">{{ marca }}
         <a href="{{ url_for('productos_lista', **(request.args.to_dict() | reject_key('marca'))) }}"
            class="text-white text-decoration-none ms-1">&times;</a></span>
+    {% endif %}
+    {% if proveedor_id %}
+      {% for pr in proveedores if pr.id == proveedor_id %}
+        <span class="badge bg-secondary me-1">{{ pr.nombre }}
+          <a href="{{ url_for('productos_lista', **(request.args.to_dict() | reject_key('proveedor_id'))) }}"
+             class="text-white text-decoration-none ms-1">&times;</a></span>
+      {% endfor %}
     {% endif %}
     {% if vehiculo_id %}
       {% for v in vehiculos if v.id == vehiculo_id %}
@@ -122,14 +143,47 @@
   </div>
 {% endif %}
 
+{# Cinco columnas en vez de once. Con el catálogo real los nombres llegan a
+   300 caracteres y "compatible con" a 200: cada uno en su columna hacía
+   filas de seis renglones con el precio perdido en el medio. Ahora el nombre
+   se corta a dos renglones, y código / marca / proveedor / auto van en un
+   renglón gris debajo. El texto completo queda en el `title` (aparece al
+   pasar el mouse) y en la ficha del producto. #}
+<style>
+  .tabla-productos { table-layout: fixed; }
+  .tabla-productos .col-foto { width: 56px; }
+  .tabla-productos .col-rubro { width: 170px; }
+  .tabla-productos .col-precio { width: 140px; }
+  .tabla-productos .col-stock { width: 76px; }
+  .tabla-productos .col-acciones { width: 96px; }
+  .prod-nombre { font-weight: 600; line-height: 1.3; display: -webkit-box; -webkit-line-clamp: 2;
+                 -webkit-box-orient: vertical; overflow: hidden; }
+  .prod-detalle { font-size: 0.8rem; color: #6b7280; white-space: nowrap; overflow: hidden;
+                  text-overflow: ellipsis; margin-top: 2px; }
+  .prod-codigo { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; }
+  .prod-rubro { font-size: 0.8rem; color: #6b7280; line-height: 1.3; }
+  .prod-precio { font-size: 1.05rem; font-weight: 600; white-space: nowrap; }
+  .prod-costo { font-size: 0.75rem; color: #9ca3af; white-space: nowrap; }
+  .prod-stock { display: inline-block; min-width: 2.4rem; padding: 2px 6px; border-radius: 6px;
+                font-size: 1.05rem; font-weight: 600; text-align: center; }
+  .prod-stock-bajo { background: #fde8e8; color: #b42318; }
+  .prod-mas-barato { color: #15803d; }
+  @media (max-width: 767px) {
+    .tabla-productos .col-rubro, .tabla-productos .celda-rubro { display: none; }
+  }
+</style>
 <div class="card p-3">
-  <table class="table table-hover align-middle mb-0">
+  <table class="table table-hover align-middle mb-0 tabla-productos">
     <thead>
-      <tr><th></th><th>Código</th><th>Nombre</th><th>Categoría</th><th>Marca</th><th>Compatible con</th><th class="text-end">Costo</th><th class="text-end">Precio</th><th class="text-end">Stock</th><th>Mejor precio</th><th></th></tr>
+      <tr>
+        <th class="col-foto"></th><th>Producto</th><th class="col-rubro">Rubro</th>
+        <th class="col-precio text-end">Precio</th><th class="col-stock text-center">Stock</th>
+        <th class="col-acciones"></th>
+      </tr>
     </thead>
     <tbody id="productosBody">
     {% for p in productos %}
-      <tr class="fila-producto {{ 'low-stock' if p.stock_actual <= p.stock_minimo else '' }}">
+      <tr class="fila-producto">
         <td>
           {% if p.imagen %}
             <img src="{{ p.imagen|url_imagen }}" alt="" style="width:40px;height:40px;object-fit:cover;border-radius:6px;">
@@ -137,22 +191,34 @@
             <span class="text-muted"><i class="bi bi-image" style="font-size:1.3rem;"></i></span>
           {% endif %}
         </td>
-        <td>{{ p.codigo }}</td>
-        <td>{{ p.nombre }}</td>
-        <td><span class="badge bg-secondary">{{ p.categoria }}</span></td>
-        <td>{{ p.marca }}</td>
-        <td>{{ p.modelo_compatible }}</td>
-        <td class="text-end">{{ p.precio_costo|money }}</td>
-        <td class="text-end">{{ p.precio_venta|money }}</td>
-        <td class="text-end">{{ p.stock_actual }} <span class="text-muted">/ min {{ p.stock_minimo }}</span></td>
         <td>
-          {% set mejor = mejores_precios[p.id] %}
-          {% if mejor %}
-            <span class="badge bg-secondary">{{ mejor.proveedor_nombre }}</span>
-            <span class="text-muted small">{{ mejor.precio_costo|money }}</span>
-          {% else %}
-            <span class="text-muted small">Sin cotizaciones cargadas</span>
+          <div class="prod-nombre" title="{{ p.nombre }}">{{ p.nombre }}</div>
+          {% set detalle = [p.marca, p.proveedor_nombre, p.modelo_compatible] | select | join(' · ') %}
+          <div class="prod-detalle" title="{{ detalle }}">
+            {% if p.codigo %}<span class="prod-codigo">{{ p.codigo }}</span>{% if detalle %} · {% endif %}{% endif %}{{ detalle }}
+          </div>
+          {# Sólo cuando hay con qué comparar: dos o más proveedores cotizados
+             y el más barato no es el de la ficha. #}
+          {% set barato = mas_baratos.get(p.id) %}
+          {% if barato and barato.proveedor_id != p.proveedor_id %}
+            <div class="prod-detalle prod-mas-barato">
+              <i class="bi bi-tag"></i> Más barato en {{ barato.proveedor_nombre }}: {{ barato.precio_costo|money }}
+            </div>
           {% endif %}
+        </td>
+        <td class="celda-rubro">
+          <div class="prod-rubro">{{ p.categoria }}{% if p.subcategoria %}<br>{{ p.subcategoria }}{% endif %}</div>
+        </td>
+        <td class="text-end">
+          <div class="prod-precio">{{ p.precio_venta|money }}</div>
+          <div class="prod-costo">costo {{ p.precio_costo|money }}</div>
+        </td>
+        <td class="text-center">
+          {# stock_minimo = 0 es "no controlar reposición de esto" (mismo
+             criterio que /pedidos), así que no se marca. #}
+          {% set bajo = p.stock_minimo > 0 and p.stock_actual <= p.stock_minimo %}
+          <span class="prod-stock {{ 'prod-stock-bajo' if bajo }}"
+                title="Mínimo: {{ p.stock_minimo }}">{{ p.stock_actual }}</span>
         </td>
         <td class="text-end">
           <a href="{{ url_for('productos_editar', producto_id=p.id) }}" class="btn btn-sm btn-outline-secondary"><i class="bi bi-pencil"></i></a>
@@ -166,8 +232,8 @@
       {% if not sugerencias %}
         {# Si hay sugerencias, ese alert de arriba ya explica por qué no hay
            resultados — mostrar los dos mensajes juntos se contradice. #}
-        <tr><td colspan="11" class="text-center text-muted py-4">
-          {% if q or categoria or subcategoria or marca or vehiculo_id or solo_con_stock %}
+        <tr><td colspan="6" class="text-center text-muted py-4">
+          {% if q or categoria or subcategoria or marca or proveedor_id or vehiculo_id or solo_con_stock %}
             Ningún producto coincide con los filtros aplicados.
             <a href="{{ url_for('productos_lista') }}">Limpiar todo</a>
           {% else %}

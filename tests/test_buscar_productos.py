@@ -187,3 +187,62 @@ def test_no_sugiere_cualquier_cosa(db_conn, catalogo):
 def test_no_sugiere_sin_texto(db_conn, catalogo):
     assert db.sugerencias_busqueda(db_conn, "") == []
     assert db.sugerencias_busqueda(db_conn, None) == []
+
+
+# --- Proveedor ---------------------------------------------------------------
+
+@pytest.fixture
+def dos_proveedores(db_conn):
+    """Dos productos de Zerbini y uno de Rodamitre."""
+    ids = {}
+    for nombre in ("Zerbini", "Rodamitre"):
+        ids[nombre] = db_conn.execute(
+            "INSERT INTO proveedores (nombre) VALUES (%s) RETURNING id", (nombre,)
+        ).fetchone()["id"]
+    for nombre, proveedor in [
+        ("Parrilla de suspension", "Zerbini"),
+        ("Rodamiento de rueda", "Zerbini"),
+        ("Rotula de suspension", "Rodamitre"),
+    ]:
+        db_conn.execute(
+            """INSERT INTO productos (nombre, categoria, precio_costo, precio_venta, proveedor_id)
+               VALUES (%s, 'Suspensión', 100, 130, %s)""",
+            (nombre, ids[proveedor]),
+        )
+    return ids
+
+
+def test_filtra_por_proveedor(db_conn, dos_proveedores):
+    filas = db.buscar_productos(db_conn, proveedor_id=dos_proveedores["Zerbini"])
+    assert sorted(f["nombre"] for f in filas) == ["Parrilla de suspension", "Rodamiento de rueda"]
+
+
+def test_el_texto_libre_encuentra_por_nombre_de_proveedor(db_conn, dos_proveedores):
+    """'¿Qué tengo de Zerbini?' se escribe en el buscador igual que se
+    pregunta: el nombre del proveedor no está en ningún campo del producto."""
+    filas = db.buscar_productos(db_conn, q="zerbini")
+    assert sorted(f["nombre"] for f in filas) == ["Parrilla de suspension", "Rodamiento de rueda"]
+
+
+def test_proveedor_y_palabra_se_combinan(db_conn, dos_proveedores):
+    filas = db.buscar_productos(db_conn, q="zerbini parrilla")
+    assert [f["nombre"] for f in filas] == ["Parrilla de suspension"]
+
+
+def test_la_busqueda_devuelve_el_nombre_del_proveedor(db_conn, dos_proveedores):
+    """La pantalla lo muestra en cada fila; un producto sin proveedor no
+    tiene que desaparecer del resultado por eso."""
+    db_conn.execute(
+        "INSERT INTO productos (nombre, categoria, precio_costo, precio_venta) VALUES ('Sin proveedor', 'Varios', 1, 2)"
+    )
+    filas = {f["nombre"]: f["proveedor_nombre"] for f in db.buscar_productos(db_conn)}
+    assert filas["Rotula de suspension"] == "Rodamitre"
+    assert filas["Sin proveedor"] is None
+
+
+def test_un_proveedor_bien_escrito_no_se_busca_por_parecido(db_conn, dos_proveedores):
+    """'zerbini' existe (como proveedor), así que en 'zerbini parrila' la única
+    palabra a perdonar es la mal escrita."""
+    filas, difusas = db.buscar_productos_tolerante(db_conn, q="zerbini parrila")
+    assert difusas == {"parrila"}
+    assert [f["nombre"] for f in filas] == ["Parrilla de suspension"]

@@ -1032,6 +1032,7 @@ def productos_lista():
         subcategoria=request.args.get("subcategoria", "").strip() or None,
         marca=request.args.get("marca", "").strip() or None,
         vehiculo_id=a_entero(request.args.get("vehiculo_id")),
+        proveedor_id=a_entero(request.args.get("proveedor_id")),
         solo_con_stock=request.args.get("solo_con_stock") == "1",
     )
 
@@ -1046,7 +1047,16 @@ def productos_lista():
     facetas = db.facetas_productos(conn, difuso=difuso, **filtros)
     sugerencias = db.sugerencias_busqueda(conn, filtros["q"]) if not productos else []
 
-    mejores_precios = {p["id"]: db.obtener_mejor_precio_por_producto(conn, p["id"]) for p in productos}
+    # Sólo los productos con cotización de dos o más proveedores: con uno
+    # solo no hay nada que comparar (ver obtener_precios_mas_baratos).
+    mas_baratos = db.obtener_precios_mas_baratos(conn, [p["id"] for p in productos])
+    # El desplegable ofrece los proveedores que tienen algún producto en lo
+    # que se está viendo, más el elegido aunque haya quedado en cero -- si
+    # no, el filtro activo desaparecería de su propio desplegable.
+    proveedores = [
+        pr for pr in conn.execute("SELECT id, nombre FROM proveedores ORDER BY nombre").fetchall()
+        if facetas["proveedor_id"].get(pr["id"]) or pr["id"] == filtros["proveedor_id"]
+    ]
     contexto = dict(
         productos=productos,
         facetas=facetas,
@@ -1063,7 +1073,8 @@ def productos_lista():
         # los productos que hay de verdad.
         marcas=sorted(facetas["marca"].keys(), key=str.casefold),
         vehiculos=db.obtener_vehiculos(conn),
-        mejores_precios=mejores_precios,
+        mas_baratos=mas_baratos,
+        proveedores=proveedores,
         **filtros,
     )
     conn.close()

@@ -52,3 +52,35 @@ def test_los_datos_de_ejemplo_se_cargan(db_conn):
     db.seed_demo_data(db_conn)
     total = db_conn.execute("SELECT COUNT(*) AS n FROM productos").fetchone()["n"]
     assert total > 0
+
+
+def test_precio_mas_barato_solo_cuando_hay_con_que_comparar(db_conn):
+    """Con una sola cotización no hay 'mejor precio': es el único. La pantalla
+    de Stock lo mostraba al lado de cada producto, repitiendo el proveedor."""
+    prov = [
+        db_conn.execute("INSERT INTO proveedores (nombre) VALUES (%s) RETURNING id", (n,)).fetchone()["id"]
+        for n in ("Caro", "Barato", "Desactivado")
+    ]
+    db_conn.execute("UPDATE proveedores SET activo = false WHERE id = %s", (prov[2],))
+    prods = [
+        db_conn.execute(
+            "INSERT INTO productos (nombre, categoria, precio_costo, precio_venta) VALUES (%s, 'Frenos', 1, 2) RETURNING id",
+            (n,),
+        ).fetchone()["id"]
+        for n in ("Con dos", "Con una", "Con una activa")
+    ]
+    for producto, proveedor, precio in [
+        (prods[0], prov[0], "150.00"), (prods[0], prov[1], "120.00"),
+        (prods[1], prov[0], "90.00"),
+        # la segunda cotización es de un proveedor desactivado: no cuenta
+        (prods[2], prov[0], "90.00"), (prods[2], prov[2], "10.00"),
+    ]:
+        db_conn.execute(
+            "INSERT INTO producto_proveedor (producto_id, proveedor_id, precio_costo) VALUES (%s, %s, %s)",
+            (producto, proveedor, precio),
+        )
+    baratos = db.obtener_precios_mas_baratos(db_conn, prods)
+    assert list(baratos) == [prods[0]]
+    assert baratos[prods[0]]["proveedor_nombre"] == "Barato"
+    assert baratos[prods[0]]["precio_costo"] == Decimal("120.00")
+    assert db.obtener_precios_mas_baratos(db_conn, []) == {}
