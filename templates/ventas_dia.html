@@ -65,18 +65,18 @@
 
 <div class="card p-3">
   <h5 class="mb-3">Detalle</h5>
-  <table class="table table-hover align-middle mb-0">
+  <table class="table table-hover align-middle mb-0 tabla-fichas">
     <thead><tr><th>N° comprobante</th><th>Tipo</th><th>Cliente</th><th>Medio de pago</th><th>Operación</th><th class="text-end">Total</th><th></th></tr></thead>
     <tbody>
     {% for v in ventas %}
       <tr>
-        <td>{{ v.numero_comprobante }}</td>
-        <td><span class="badge bg-secondary">{{ v.tipo_comprobante }}</span></td>
-        <td>{{ v.cliente_nombre or 'Consumidor final' }}</td>
-        <td>{{ v.metodo_pago }}</td>
-        <td>{{ v.id_operacion or '' }}</td>
-        <td class="text-end">{{ v.total|money }}</td>
-        <td class="text-end">
+        <td class="ficha-dato">{{ v.numero_comprobante }}</td>
+        <td class="ficha-dato"><span class="badge bg-secondary">{{ v.tipo_comprobante }}</span></td>
+        <td class="ficha-titulo">{{ v.cliente_nombre or 'Consumidor final' }}</td>
+        <td class="ficha-dato">{{ v.metodo_pago }}</td>
+        <td class="ficha-dato">{% if v.id_operacion %}<span class="d-md-none">op. </span>{{ v.id_operacion }}{% endif %}</td>
+        <td class="text-end ficha-destacado">{{ v.total|money }}</td>
+        <td class="text-end ficha-acciones">
           <a href="{{ url_for('ventas_comprobante', venta_id=v.id) }}" class="btn btn-sm btn-outline-primary"><i class="bi bi-receipt"></i> Ver</a>
         </td>
       </tr>

@@ -41,23 +41,23 @@
 </div>
 
 <div class="card p-3">
-  <table class="table table-hover align-middle mb-0">
+  <table class="table table-hover align-middle mb-0 tabla-fichas">
     <thead><tr><th>Auto</th><th>Años</th><th class="text-end">Productos</th><th></th><th></th></tr></thead>
     <tbody>
     {% for v in vehiculos %}
       <tr class="{{ '' if v.activo else 'text-muted' }}">
-        <td>{{ v.marca_auto }} {{ v.modelo }} <span class="text-muted">{{ v.motor }}</span>
+        <td class="ficha-titulo">{{ v.marca_auto }} {{ v.modelo }} <span class="text-muted">{{ v.motor }}</span>
           {% if not v.activo %}<span class="badge bg-secondary ms-1">desactivado</span>{% endif %}
         </td>
-        <td>{% if v.anio_desde or v.anio_hasta %}{{ v.anio_desde or '?' }} - {{ v.anio_hasta or '?' }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
-        <td class="text-end">{{ usos.get(v.id, 0) }}</td>
-        <td class="text-end">
+        <td class="ficha-dato">{% if v.anio_desde or v.anio_hasta %}{{ v.anio_desde or '?' }} - {{ v.anio_hasta or '?' }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
+        <td class="text-end ficha-dato">{{ usos.get(v.id, 0) }}<span class="d-md-none"> productos</span></td>
+        <td class="text-end ficha-acciones">
           <form method="post" action="{{ url_for('vehiculos_activar', vehiculo_id=v.id) }}" class="d-inline">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
             <button class="btn btn-sm btn-outline-secondary">{{ 'Desactivar' if v.activo else 'Activar' }}</button>
           </form>
         </td>
-        <td class="text-end">
+        <td class="text-end ficha-acciones ms-0">
           <form method="post" action="{{ url_for('vehiculos_eliminar', vehiculo_id=v.id) }}" class="d-inline"
                 onsubmit="return confirm('¿Eliminar este auto?');">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

@@ -39,6 +39,44 @@
   a:hover, .btn-link:hover { color: var(--si-gold); }
   .form-control:focus, .form-select:focus { border-color: var(--si-gold); box-shadow: 0 0 0 0.25rem rgba(242, 183, 5, 0.25); }
   ::selection { background-color: var(--si-gold); color: #171717; }
+  /* Listados que en el celular pasan de tabla a fichas: una tabla de siete
+     o nueve columnas no entra en 375 px y obliga a deslizar de costado para
+     ver el total o los botones. Bajo 768 px cada fila se vuelve una ficha:
+     el título arriba, los datos secundarios en gris en un renglón, y al pie
+     el dato que importa (total, saldo) junto a los botones. Se activa con
+     la clase `tabla-fichas` en la <table> y una clase `ficha-*` por celda;
+     en computadora esas clases no hacen nada y la tabla se ve como siempre. */
+  @media (max-width: 767px) {
+    .tabla-fichas, .tabla-fichas tbody { display: block; width: 100%; }
+    .tabla-fichas thead { display: none; }
+    .tabla-fichas tr { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px;
+                       padding: 12px 0; border-bottom: 1px solid #e5e7eb; }
+    .tabla-fichas td { display: block; padding: 0; border: 0; }
+    .tabla-fichas td:empty, .tabla-fichas .ficha-oculta { display: none; }
+    .tabla-fichas .ficha-titulo { order: 0; flex: 0 0 100%; font-weight: 600; }
+    .tabla-fichas .ficha-dato { order: 1; font-size: 0.8rem; color: #6b7280; }
+    /* corte de renglón entre los datos en gris y el pie de la ficha */
+    .tabla-fichas tr::before { content: ""; order: 2; flex: 0 0 100%; }
+    .tabla-fichas .ficha-destacado { order: 3; flex: 1 1 auto; font-size: 1.05rem; font-weight: 600;
+                                     text-align: left !important; }
+    /* margin-left: auto: si la ficha no tiene dato destacado (un cliente sin
+       deuda), los botones igual quedan a la derecha. */
+    .tabla-fichas .ficha-acciones { order: 4; white-space: nowrap; margin-left: auto; }
+  }
+  /* Renglones de carga (los productos de una venta): en el celular cada
+     renglón apila el buscador de producto a todo el ancho y debajo los
+     campos numéricos. Como tabla, al buscador le quedaban 74 px. El rótulo
+     de cada campo sale de `data-label`, porque el encabezado se oculta. */
+  @media (max-width: 767px) {
+    .tabla-items, .tabla-items tbody { display: block; width: 100%; }
+    .tabla-items thead { display: none; }
+    .tabla-items tr { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+                      gap: 8px; align-items: end; padding: 12px 0; border-bottom: 1px solid #e5e7eb; }
+    .tabla-items td { display: block; padding: 0; border: 0; }
+    .tabla-items td:first-child { grid-column: 1 / -1; }
+    .tabla-items td[data-label]::before { content: attr(data-label); display: block;
+                                          font-size: 0.75rem; color: #6b7280; }
+  }
   @media print {
     .no-print { display: none !important; }
   }

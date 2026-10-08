@@ -69,7 +69,7 @@
       <h6 class="mb-0">Productos</h6>
       <button type="button" class="btn btn-sm btn-outline-primary" onclick="agregarFila()"><i class="bi bi-plus-lg"></i> Agregar producto</button>
     </div>
-    <table class="table" id="itemsTable">
+    <table class="table tabla-items" id="itemsTable">
       <thead><tr><th style="width:45%;">Producto</th><th style="width:120px;">Cantidad</th><th style="width:140px;">Precio unit.</th><th></th></tr></thead>
       <tbody id="itemsBody"></tbody>
     </table>
@@ -89,8 +89,8 @@
         <div class="list-group producto-resultados position-absolute w-100 shadow" style="z-index: 1050; max-height: 260px; overflow-y: auto; display: none;"></div>
       </div>
     </td>
-    <td><input type="number" name="cantidad" min="1" value="1" class="form-control" required></td>
-    <td><input type="text" name="precio_unitario_display" class="form-control" readonly></td>
+    <td data-label="Cantidad"><input type="number" name="cantidad" min="1" value="1" class="form-control" required></td>
+    <td data-label="Precio unit."><input type="text" name="precio_unitario_display" class="form-control" readonly></td>
     <td><button type="button" class="btn btn-sm btn-outline-danger" onclick="this.closest('tr').remove()"><i class="bi bi-trash"></i></button></td>
   </tr>
 </template>

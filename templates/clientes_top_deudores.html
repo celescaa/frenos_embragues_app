@@ -8,6 +8,7 @@
 
 <div class="card p-3">
   {% if deudores %}
+  <div class="table-responsive">
   <table class="table table-hover align-middle mb-0">
     <thead><tr><th>#</th><th>Cliente</th><th>Teléfono</th><th class="text-end">Saldo</th><th></th></tr></thead>
     <tbody>
@@ -24,6 +25,7 @@
     {% endfor %}
     </tbody>
   </table>
+  </div>
   {% else %}
     <p class="text-muted mb-0">Ningún cliente tiene saldo pendiente en su cuenta corriente en este momento.</p>
   {% endif %}

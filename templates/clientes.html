@@ -1,9 +1,9 @@
 {% extends "base.html" %}
 {% block title %}Clientes | Frenos & Embragues{% endblock %}
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3">
+<div class="d-flex flex-wrap gap-2 justify-content-between align-items-center mb-3">
   <h4 class="mb-0"><i class="bi bi-people"></i> Clientes</h4>
-  <div>
+  <div class="d-flex flex-wrap gap-2">
     <a href="{{ url_for('clientes_top') }}" class="btn btn-outline-primary"><i class="bi bi-trophy"></i> Top clientes</a>
     <a href="{{ url_for('clientes_top_deudores') }}" class="btn btn-outline-primary"><i class="bi bi-exclamation-diamond"></i> Top deudores</a>
     <a href="{{ url_for('clientes_nuevo') }}" class="btn btn-primary"><i class="bi bi-plus-lg"></i> Nuevo cliente</a>
@@ -15,22 +15,22 @@
 </form>
 
 <div class="card p-3">
-  <table class="table table-hover align-middle mb-0">
+  <table class="table table-hover align-middle mb-0 tabla-fichas">
     <thead>
       <tr><th>Nombre</th><th>Tipo</th><th>Teléfono</th><th>Email</th><th>Dirección</th><th>CUIT/DNI</th><th>Alta</th><th class="text-end">Saldo</th><th></th></tr>
     </thead>
     <tbody>
     {% for c in clientes %}
       <tr>
-        <td>{{ c.nombre }}</td>
-        <td>{% if c.tipo_cliente == 'mecanico' %}<span class="badge bg-secondary">Mecánico</span>{% else %}Particular{% endif %}</td>
-        <td>{{ c.telefono }}</td>
-        <td>{{ c.email }}</td>
-        <td>{{ c.direccion }}</td>
-        <td>{{ c.cuit_dni }}</td>
-        <td>{{ c.fecha_alta }}</td>
-        <td class="text-end">{% if c.saldo and c.saldo > 0 %}<span class="text-danger fw-bold">{{ c.saldo|money }}</span>{% endif %}</td>
-        <td class="text-end">
+        <td class="ficha-titulo">{{ c.nombre }}</td>
+        <td class="ficha-dato">{% if c.tipo_cliente == 'mecanico' %}<span class="badge bg-secondary">Mecánico</span>{% else %}Particular{% endif %}</td>
+        <td class="ficha-dato">{{ c.telefono }}</td>
+        <td class="ficha-dato">{{ c.email }}</td>
+        <td class="ficha-oculta">{{ c.direccion }}</td>
+        <td class="ficha-oculta">{{ c.cuit_dni }}</td>
+        <td class="ficha-oculta">{{ c.fecha_alta }}</td>
+        <td class="text-end ficha-destacado">{% if c.saldo and c.saldo > 0 %}<span class="text-danger fw-bold"><span class="d-md-none small fw-normal">Debe </span>{{ c.saldo|money }}</span>{% endif %}</td>
+        <td class="text-end ficha-acciones">
           <a href="{{ url_for('cuenta_corriente_ver', cliente_id=c.id) }}" class="btn btn-sm btn-outline-primary" title="Cuenta corriente"><i class="bi bi-journal-text"></i></a>
           <a href="{{ url_for('clientes_editar', cliente_id=c.id) }}" class="btn btn-sm btn-outline-secondary"><i class="bi bi-pencil"></i></a>
           <form method="post" action="{{ url_for('clientes_eliminar', cliente_id=c.id) }}" class="d-inline" onsubmit="return confirm('¿Eliminar este cliente?');">

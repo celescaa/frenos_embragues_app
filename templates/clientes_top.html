@@ -17,20 +17,20 @@
 </form>
 
 <div class="card p-3 mb-4">
-  <table class="table table-hover align-middle mb-0">
+  <table class="table table-hover align-middle mb-0 tabla-fichas">
     <thead>
       <tr><th>#</th><th>Cliente</th><th>Tipo</th><th class="text-end">Compras</th><th class="text-end">Total</th><th class="text-end">Margen estimado</th><th></th></tr>
     </thead>
     <tbody>
     {% for c in ranking %}
       <tr>
-        <td>{{ loop.index }}</td>
-        <td>{{ c.nombre }}</td>
-        <td>{% if c.tipo_cliente == 'mecanico' %}<span class="badge bg-secondary">Mecánico</span>{% else %}Particular{% endif %}</td>
-        <td class="text-end">{{ c.cant_compras }}</td>
-        <td class="text-end">{{ c.total|money }}</td>
-        <td class="text-end">{{ margenes[c.id]|money }}</td>
-        <td class="text-end">
+        <td class="ficha-oculta">{{ loop.index }}</td>
+        <td class="ficha-titulo"><span class="d-md-none text-muted fw-normal">{{ loop.index }}. </span>{{ c.nombre }}</td>
+        <td class="ficha-dato">{% if c.tipo_cliente == 'mecanico' %}<span class="badge bg-secondary">Mecánico</span>{% else %}Particular{% endif %}</td>
+        <td class="text-end ficha-dato">{{ c.cant_compras }}<span class="d-md-none"> compras</span></td>
+        <td class="text-end ficha-destacado">{{ c.total|money }}</td>
+        <td class="text-end ficha-dato"><span class="d-md-none">margen </span>{{ margenes[c.id]|money }}</td>
+        <td class="text-end ficha-acciones">
           <button type="button" class="btn btn-sm btn-outline-primary" data-bs-toggle="modal"
                   data-bs-target="#modalPromocion" onclick="prepararModalPromocion({{ c.id }}, '{{ c.nombre|e }}')">
             <i class="bi bi-tag"></i> Aplicar promoción
@@ -48,6 +48,9 @@
 <div class="card p-3">
   <h6 class="mb-3">Promociones vigentes</h6>
   {% if promociones_vigentes %}
+  {# Siete columnas angostas: en el celular se desliza de costado adentro
+     de la tarjeta, sin arrastrar toda la página. #}
+  <div class="table-responsive">
   <table class="table table-sm mb-0">
     <thead><tr><th>Cliente</th><th>Descuento</th><th>Alcance</th><th>Desde</th><th>Hasta</th><th>Aprobado por</th><th></th></tr></thead>
     <tbody>
@@ -69,6 +72,7 @@
     {% endfor %}
     </tbody>
   </table>
+  </div>
   {% else %}
     <p class="text-muted mb-0">No hay promociones vigentes en este momento.</p>
   {% endif %}

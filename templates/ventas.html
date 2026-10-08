@@ -1,7 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Ventas | Frenos & Embragues{% endblock %}
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-3">
+<div class="d-flex flex-wrap gap-2 justify-content-between align-items-center mb-3">
   <h4 class="mb-0"><i class="bi bi-cash-coin"></i> Ventas</h4>
   <div>
     <a href="{{ url_for('ventas_dia') }}" class="btn btn-outline-primary"><i class="bi bi-calendar-check"></i> Ventas del día</a>
@@ -9,18 +9,18 @@
   </div>
 </div>
 <div class="card p-3">
-  <table class="table table-hover align-middle mb-0">
+  <table class="table table-hover align-middle mb-0 tabla-fichas">
     <thead><tr><th>Fecha</th><th>N° comprobante</th><th>Tipo</th><th>Cliente</th><th>Método de pago</th><th class="text-end">Total</th><th></th></tr></thead>
     <tbody>
     {% for v in ventas %}
       <tr>
-        <td>{{ v.fecha }}</td>
-        <td>{{ v.numero_comprobante }}</td>
-        <td><span class="badge bg-secondary">{{ v.tipo_comprobante }}</span></td>
-        <td>{{ v.cliente_nombre or 'Consumidor final' }}</td>
-        <td>{{ v.metodo_pago }}</td>
-        <td class="text-end">{{ v.total|money }}</td>
-        <td class="text-end">
+        <td class="ficha-dato">{{ v.fecha }}</td>
+        <td class="ficha-dato">{{ v.numero_comprobante }}</td>
+        <td class="ficha-dato"><span class="badge bg-secondary">{{ v.tipo_comprobante }}</span></td>
+        <td class="ficha-titulo">{{ v.cliente_nombre or 'Consumidor final' }}</td>
+        <td class="ficha-dato">{{ v.metodo_pago }}</td>
+        <td class="text-end ficha-destacado">{{ v.total|money }}</td>
+        <td class="text-end ficha-acciones">
           <a href="{{ url_for('ventas_comprobante', venta_id=v.id) }}" class="btn btn-sm btn-outline-primary"><i class="bi bi-receipt"></i> Ver</a>
         </td>
       </tr>

@@ -1635,6 +1635,16 @@ caracteres (Eine pone todos los autos en la descripción) y otro tanto en
   pedido de Celes. Con mínimo 1 siguen en rojo los 595 productos que tienen
   una sola unidad.
 
+- **Las demás pantallas de uso diario también se adaptan al celular**
+  (08/10/2026): Ventas, Ventas del día, Clientes, Top clientes y Autos. Las
+  reglas viven una sola vez en `base.html`: `tabla-fichas` convierte cada
+  fila en una ficha (clases `ficha-titulo` / `ficha-dato` / `ficha-destacado`
+  / `ficha-acciones` / `ficha-oculta` por celda) y `tabla-items` apila los
+  renglones de carga de Nueva venta (al buscador de producto le quedaban
+  74 px). En computadora no cambian nada. `/productos` usa su propia versión
+  porque su fila es distinta. **Compras, cuenta corriente y proveedores
+  todavía no se revisaron en celular.**
+
 **No se pudo correr la suite**: la Mac de Celes tiene Docker Desktop
 desinstalado (queda la carpeta `/Applications/Docker.app` vacía), así que no
 hay Supabase local. Los tests nuevos están escritos pero sin ejecutar. Lo que
