@@ -19,7 +19,6 @@
       <input name="motor" class="form-control" required placeholder="1.4"
              list="motoresSugeridos">
       <datalist id="motoresSugeridos"><option value="Todos los motores"></datalist>
-      <div class="form-text">Si el repuesto sirve para cualquier motor, poné "Todos los motores".</div>
     </div>
     <div class="col-md-2">
       <label class="form-label small">Año desde <span class="text-muted">(opcional)</span></label>
@@ -31,6 +30,12 @@
     </div>
     <div class="col-md-2">
       <button class="btn btn-primary w-100"><i class="bi bi-plus-lg"></i> Agregar</button>
+    </div>
+    {# La ayuda del motor va en un renglón aparte, debajo de toda la fila:
+       adentro de la columna de Motor la hacía más alta que las demás y, con
+       align-items-end, ese campo quedaba un renglón más arriba que el resto. #}
+    <div class="col-12 form-text mt-1">
+      Motor: si el repuesto sirve para cualquier motor, poné "Todos los motores".
     </div>
   </form>
 </div>
