@@ -15,24 +15,24 @@
 </div>
 
 <div class="card p-3">
-  <table class="table table-hover align-middle mb-0">
+  <table class="table table-hover align-middle mb-0 tabla-fichas">
     <thead><tr><th>Nombre</th><th>Teléfono</th><th>Email</th><th>Dirección</th><th>CUIT</th><th>Estado</th><th></th></tr></thead>
     <tbody>
     {% for p in proveedores %}
       <tr class="{{ 'text-muted' if not p.activo else '' }}">
-        <td>{{ p.nombre }}</td>
-        <td>{{ p.telefono }}</td>
-        <td>{{ p.email }}</td>
-        <td>{{ p.direccion }}</td>
-        <td>{{ p.cuit }}</td>
-        <td>
+        <td class="ficha-titulo">{{ p.nombre }}</td>
+        <td class="ficha-dato">{{ p.telefono }}</td>
+        <td class="ficha-dato">{{ p.email }}</td>
+        <td class="ficha-oculta">{{ p.direccion }}</td>
+        <td class="ficha-oculta">{{ p.cuit }}</td>
+        <td class="ficha-destacado">
           {% if p.activo %}
             <span class="badge bg-success">Activo</span>
           {% else %}
             <span class="badge bg-secondary">Desactivado</span>
           {% endif %}
         </td>
-        <td class="text-end">
+        <td class="text-end ficha-acciones">
           <a href="{{ url_for('proveedores_editar', proveedor_id=p.id) }}" class="btn btn-sm btn-outline-secondary"><i class="bi bi-pencil"></i></a>
           {% if p.activo %}
             <form method="post" action="{{ url_for('proveedores_desactivar', proveedor_id=p.id, todos=1 if mostrar_todos else None) }}" class="d-inline">

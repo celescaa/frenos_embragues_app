@@ -1642,8 +1642,21 @@ caracteres (Eine pone todos los autos en la descripción) y otro tanto en
   / `ficha-acciones` / `ficha-oculta` por celda) y `tabla-items` apila los
   renglones de carga de Nueva venta (al buscador de producto le quedaban
   74 px). En computadora no cambian nada. `/productos` usa su propia versión
-  porque su fila es distinta. **Compras, cuenta corriente y proveedores
-  todavía no se revisaron en celular.**
+  porque su fila es distinta.
+- **Revisión completa en celular** (08/10/2026): se renderizaron las 27
+  pantallas con GET del sistema a 375 px y se midió el desborde horizontal de
+  cada una. Pasaron a fichas Proveedores, Compras, Usuarios, Pedidos y
+  Movimientos sin factura; a `tabla-items` los renglones de Nueva compra, de
+  cotizaciones en la ficha de producto y de cargos en cuenta corriente. Las
+  tres que no se pueden renderizar sin datos (historial de cuenta corriente,
+  comprobante, revisión de factura importada) quedaron envueltas en
+  `table-responsive`: se deslizan adentro de su tarjeta, **sin haberlas visto
+  con datos**.
+- **El panel listaba TODO el stock bajo, sin tope**: con la carga real eran
+  595 renglones. Ahora muestra 15 (`LIMITE_STOCK_BAJO_PANEL`) con el total y
+  un link a `/pedidos`, y excluye `stock_minimo = 0` como hace esa pantalla.
+  Sus tres tablas usan `tabla-resumen` (ancho fijo) para que un nombre de 300
+  caracteres no empuje los números fuera de la tarjeta.
 
 **No se pudo correr la suite**: la Mac de Celes tiene Docker Desktop
 desinstalado (queda la carpeta `/Applications/Docker.app` vacía), así que no

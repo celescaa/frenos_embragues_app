@@ -482,6 +482,10 @@ def subcategorias_por_categoria_json(conn):
 # ---------------------------------------------------------------------------
 # Dashboard / Analítica
 # ---------------------------------------------------------------------------
+# Cuántos productos con stock bajo lista el panel (ver dashboard()).
+LIMITE_STOCK_BAJO_PANEL = 15
+
+
 @app.route("/")
 def dashboard():
     conn = db.get_connection()
@@ -537,9 +541,20 @@ def dashboard():
     ).fetchall()
 
     # Stock bajo
+    # Con tope: con el stock real cargado hay cientos de productos en el
+    # mínimo, y dibujarlos todos convertía el panel en una lista de 600
+    # renglones. El panel muestra los más urgentes y el total; la lista
+    # completa y agrupada por proveedor es /pedidos. stock_minimo = 0 queda
+    # afuera, igual que ahí ("no controlar reposición de esto").
+    condicion_stock_bajo = "stock_minimo > 0 AND stock_actual <= stock_minimo"
     stock_bajo = conn.execute(
-        "SELECT * FROM productos WHERE stock_actual <= stock_minimo ORDER BY stock_actual ASC"
+        f"SELECT * FROM productos WHERE {condicion_stock_bajo} "
+        "ORDER BY stock_actual ASC, nombre LIMIT %s",
+        (LIMITE_STOCK_BAJO_PANEL,),
     ).fetchall()
+    stock_bajo_total = conn.execute(
+        f"SELECT count(*) AS n FROM productos WHERE {condicion_stock_bajo}"
+    ).fetchone()["n"]
 
     conn.close()
 
@@ -554,6 +569,7 @@ def dashboard():
         top_productos=top_productos,
         top_clientes=top_clientes,
         stock_bajo=stock_bajo,
+        stock_bajo_total=stock_bajo_total,
     )
 
 

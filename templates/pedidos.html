@@ -23,8 +23,8 @@
 
   {% for proveedor, datos in grupos.items() %}
     <div class="card p-4 mb-3">
-      <div class="d-flex justify-content-between align-items-start mb-3">
-        <div>
+      <div class="d-flex flex-wrap gap-2 justify-content-between align-items-start mb-3">
+        <div style="min-width: 0; overflow-wrap: anywhere;">
           <h5 class="mb-1">{{ proveedor }}</h5>
           <div class="text-muted small">
             {% if datos.email %}<i class="bi bi-envelope"></i> {{ datos.email }}{% endif %}
@@ -39,7 +39,7 @@
 
       <form method="post" action="{{ url_for('pedidos_marcar') }}">
         <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-        <table class="table table-sm align-middle mb-2">
+        <table class="table table-sm align-middle mb-2 tabla-fichas">
           <thead>
             <tr>
               <th>Código</th><th>Producto</th>
@@ -50,21 +50,21 @@
           <tbody>
           {% for it in datos['items'] %}
             <tr>
-              <td>
+              <td class="ficha-dato">
                 <input type="hidden" name="producto_id" value="{{ it.producto_id }}">
                 {{ it.codigo_proveedor or it.codigo or '—' }}
               </td>
-              <td>
+              <td class="ficha-titulo">
                 {{ it.nombre }}
                 {% if it.hay_alternativas %}
                   <span class="badge bg-success" title="Es el precio más bajo entre los proveedores cargados para este producto">mejor precio</span>
                 {% endif %}
               </td>
-              <td class="text-end {{ 'text-danger fw-bold' if it.stock_actual <= 0 else '' }}">{{ it.stock_actual }}</td>
-              <td class="text-end text-muted">{{ it.stock_minimo }}</td>
-              <td class="text-end fw-bold">{{ it.sugerido }}</td>
-              <td class="text-end">{{ it.precio_costo|money }}</td>
-              <td class="text-end">{{ it.costo_estimado|money }}</td>
+              <td class="text-end ficha-dato {{ 'text-danger fw-bold' if it.stock_actual <= 0 else '' }}"><span class="d-md-none">stock </span>{{ it.stock_actual }}</td>
+              <td class="text-end text-muted ficha-dato"><span class="d-md-none">mín. </span>{{ it.stock_minimo }}</td>
+              <td class="text-end fw-bold ficha-destacado"><span class="d-md-none small fw-normal text-muted">Pedir </span>{{ it.sugerido }}</td>
+              <td class="text-end ficha-dato"><span class="d-md-none">c/u </span>{{ it.precio_costo|money }}</td>
+              <td class="text-end ficha-acciones">{{ it.costo_estimado|money }}</td>
             </tr>
           {% endfor %}
           </tbody>
@@ -93,15 +93,15 @@
 {% if pendientes %}
   <div class="card p-4 mt-4 no-print">
     <h6 class="mb-3"><i class="bi bi-truck"></i> Ya pedidos, esperando que lleguen</h6>
-    <table class="table table-sm align-middle mb-0">
+    <table class="table table-sm align-middle mb-0 tabla-fichas">
       <thead><tr><th>Código</th><th>Producto</th><th>Pedido el</th><th></th></tr></thead>
       <tbody>
       {% for p in pendientes %}
         <tr>
-          <td>{{ p.codigo or '—' }}</td>
-          <td>{{ p.nombre }}</td>
-          <td class="text-muted">{{ p.fecha_pedido_pendiente }}</td>
-          <td class="text-end">
+          <td class="ficha-dato">{{ p.codigo or '—' }}</td>
+          <td class="ficha-titulo">{{ p.nombre }}</td>
+          <td class="text-muted ficha-dato">{{ p.fecha_pedido_pendiente }}</td>
+          <td class="text-end ficha-acciones">
             <form method="post" action="{{ url_for('pedidos_desmarcar', producto_id=p.id) }}">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
               <button class="btn btn-sm btn-outline-secondary" title="Sacar la marca (vuelve a la lista de faltantes si sigue bajo el mínimo)">

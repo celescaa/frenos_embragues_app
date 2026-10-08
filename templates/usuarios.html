@@ -7,17 +7,17 @@
 </div>
 
 <div class="card p-3">
-  <table class="table table-hover align-middle mb-0">
+  <table class="table table-hover align-middle mb-0 tabla-fichas">
     <thead>
       <tr><th>Nombre</th><th>Usuario</th><th>Rol</th><th>Estado</th><th></th></tr>
     </thead>
     <tbody>
     {% for u in usuarios %}
       <tr>
-        <td>{{ u.nombre }}</td>
-        <td>{{ u.username }}</td>
-        <td><span class="badge bg-secondary">{{ 'Administrador' if u.rol == 'admin' else 'Empleado' }}</span></td>
-        <td>
+        <td class="ficha-titulo">{{ u.nombre }}</td>
+        <td class="ficha-dato">{{ u.username }}</td>
+        <td class="ficha-dato"><span class="badge bg-secondary">{{ 'Administrador' if u.rol == 'admin' else 'Empleado' }}</span></td>
+        <td class="ficha-destacado">
           {% if not u.activo %}
             <span class="badge bg-danger">Inactivo</span>
           {% elif u.bloqueado_hasta %}
@@ -28,7 +28,7 @@
             <span class="badge bg-success">Activo</span>
           {% endif %}
         </td>
-        <td class="text-end">
+        <td class="text-end ficha-acciones">
           <a href="{{ url_for('usuarios_editar', usuario_id=u.id) }}" class="btn btn-sm btn-outline-secondary"><i class="bi bi-pencil"></i></a>
           <form method="post" action="{{ url_for('usuarios_resetear_password', usuario_id=u.id) }}" class="d-inline" onsubmit="return confirm('¿Generar una contraseña temporal nueva para este usuario?');">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">

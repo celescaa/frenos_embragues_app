@@ -49,7 +49,7 @@
         <label class="form-label mb-0">Productos que se lleva</label>
         <button type="button" class="btn btn-sm btn-outline-primary" onclick="agregarFila()"><i class="bi bi-plus-lg"></i> Agregar producto</button>
       </div>
-      <table class="table" id="itemsTable">
+      <table class="table tabla-items" id="itemsTable">
         <thead><tr><th style="width:45%;">Producto</th><th style="width:120px;">Cantidad</th><th style="width:140px;">Precio unit.</th><th></th></tr></thead>
         <tbody id="itemsBody"></tbody>
         <tfoot>
@@ -105,14 +105,15 @@
         <div class="list-group producto-resultados position-absolute w-100 shadow" style="z-index: 1050; max-height: 260px; overflow-y: auto; display: none;"></div>
       </div>
     </td>
-    <td><input type="number" name="cantidad" min="1" value="1" class="form-control cantidad-input" required></td>
-    <td><input type="text" class="form-control precio-display" readonly></td>
+    <td data-label="Cantidad"><input type="number" name="cantidad" min="1" value="1" class="form-control cantidad-input" required></td>
+    <td data-label="Precio unit."><input type="text" class="form-control precio-display" readonly></td>
     <td><button type="button" class="btn btn-sm btn-outline-danger" onclick="this.closest('tr').remove(); actualizarTotalCargo();"><i class="bi bi-trash"></i></button></td>
   </tr>
 </template>
 
 <div class="card p-3">
   <h6 class="mb-3">Historial</h6>
+  <div class="table-responsive">
   <table class="table table-hover align-middle mb-0">
     <thead>
       <tr><th>Fecha</th><th>Tipo</th><th>Productos</th><th>A nombre de</th><th class="text-end">Monto</th><th>Factura</th><th></th></tr>
@@ -170,6 +171,7 @@
     {% endfor %}
     </tbody>
   </table>
+  </div>
 </div>
 {% endblock %}
 

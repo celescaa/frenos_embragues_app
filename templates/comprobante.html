@@ -78,6 +78,7 @@
     </div>
   </div>
 
+  <div class="table-responsive">
   <table class="table">
     <thead><tr><th>Código</th><th>Producto</th><th class="text-end">Cantidad</th><th class="text-end">Precio unit.</th><th class="text-end">Subtotal</th></tr></thead>
     <tbody>
@@ -99,6 +100,7 @@
       <tr><th colspan="4" class="text-end">Total</th><th class="text-end">{{ venta.total|money }}</th></tr>
     </tfoot>
   </table>
+  </div>
 
   {% if es_factura and venta.cae %}
   <div class="row mt-3 align-items-center">

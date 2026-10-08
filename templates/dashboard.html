@@ -40,7 +40,7 @@
     <div class="card p-3 h-100">
       <h5 class="mb-3">Top clientes</h5>
       {% if top_clientes %}
-      <table class="table table-sm mb-0">
+      <table class="table table-sm mb-0 tabla-resumen">
         <thead><tr><th>Cliente</th><th class="text-end">Compras</th><th class="text-end">Total</th></tr></thead>
         <tbody>
         {% for c in top_clientes %}
@@ -60,7 +60,7 @@
     <div class="card p-3 h-100">
       <h5 class="mb-3">Productos más vendidos</h5>
       {% if top_productos %}
-      <table class="table table-sm mb-0">
+      <table class="table table-sm mb-0 tabla-resumen">
         <thead><tr><th>Producto</th><th class="text-end">Unidades</th><th class="text-end">Total</th></tr></thead>
         <tbody>
         {% for p in top_productos %}
@@ -77,7 +77,7 @@
     <div class="card p-3 h-100">
       <h5 class="mb-3"><i class="bi bi-exclamation-triangle-fill text-warning"></i> Stock bajo (reponer)</h5>
       {% if stock_bajo %}
-      <table class="table table-sm mb-0">
+      <table class="table table-sm mb-0 tabla-resumen">
         <thead><tr><th>Producto</th><th class="text-end">Stock</th><th class="text-end">Mínimo</th></tr></thead>
         <tbody>
         {% for p in stock_bajo %}
@@ -85,6 +85,12 @@
         {% endfor %}
         </tbody>
       </table>
+      {% if stock_bajo_total > stock_bajo|length %}
+        <p class="small text-muted mt-2 mb-0">
+          Se muestran {{ stock_bajo|length }} de {{ stock_bajo_total }}.
+          <a href="{{ url_for('pedidos_lista') }}">Ver la lista de pedidos completa</a>
+        </p>
+      {% endif %}
       {% else %}
         <p class="text-muted mb-0">Todo el stock está en niveles saludables.</p>
       {% endif %}

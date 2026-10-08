@@ -9,15 +9,15 @@
   </div>
 </div>
 <div class="card p-3">
-  <table class="table table-hover align-middle mb-0">
+  <table class="table table-hover align-middle mb-0 tabla-fichas">
     <thead><tr><th>Fecha</th><th>Proveedor</th><th>N° factura proveedor</th><th class="text-end">Total</th></tr></thead>
     <tbody>
     {% for c in compras %}
       <tr>
-        <td>{{ c.fecha }}</td>
-        <td>{{ c.proveedor_nombre or '—' }}</td>
-        <td>{{ c.numero_factura_proveedor }}</td>
-        <td class="text-end">{{ c.total|money }}</td>
+        <td class="ficha-dato">{{ c.fecha }}</td>
+        <td class="ficha-titulo">{{ c.proveedor_nombre or '—' }}</td>
+        <td class="ficha-dato">{% if c.numero_factura_proveedor %}<span class="d-md-none">factura </span>{{ c.numero_factura_proveedor }}{% endif %}</td>
+        <td class="text-end ficha-destacado">{{ c.total|money }}</td>
       </tr>
     {% else %}
       <tr><td colspan="4" class="text-center text-muted py-4">Todavía no hay compras registradas.</td></tr>

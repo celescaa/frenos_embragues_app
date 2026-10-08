@@ -51,7 +51,10 @@
     .tabla-fichas thead { display: none; }
     .tabla-fichas tr { display: flex; flex-wrap: wrap; align-items: center; gap: 2px 10px;
                        padding: 12px 0; border-bottom: 1px solid #e5e7eb; }
-    .tabla-fichas td { display: block; padding: 0; border: 0; }
+    /* overflow-wrap: los nombres reales traen tramos sin espacios
+       ("IDEA/PALIO/SIENA/GRAND SIENA/STILO") que si no se parten empujan
+       la ficha fuera de la pantalla. */
+    .tabla-fichas td { display: block; padding: 0; border: 0; min-width: 0; overflow-wrap: anywhere; }
     .tabla-fichas td:empty, .tabla-fichas .ficha-oculta { display: none; }
     .tabla-fichas .ficha-titulo { order: 0; flex: 0 0 100%; font-weight: 600; }
     .tabla-fichas .ficha-dato { order: 1; font-size: 0.8rem; color: #6b7280; }
@@ -77,6 +80,13 @@
     .tabla-items td[data-label]::before { content: attr(data-label); display: block;
                                           font-size: 0.75rem; color: #6b7280; }
   }
+  /* Tablas de resumen del panel: nombre + dos números. Ancho fijo para que
+     un nombre de producto de 300 caracteres no empuje los números fuera de
+     la tarjeta; el nombre se parte en renglones adentro de su columna. */
+  .tabla-resumen { table-layout: fixed; width: 100%; }
+  .tabla-resumen th:not(:first-child), .tabla-resumen td:not(:first-child) { width: 6.5rem; white-space: nowrap; }
+  .tabla-resumen th:nth-child(2), .tabla-resumen td:nth-child(2) { width: 4.5rem; }
+  .tabla-resumen td:first-child { overflow-wrap: anywhere; }
   @media print {
     .no-print { display: none !important; }
   }

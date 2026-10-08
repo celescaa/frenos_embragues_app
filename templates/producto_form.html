@@ -134,7 +134,7 @@
       </div>
       <button type="button" class="btn btn-sm btn-outline-primary" onclick="agregarCotizacion()"><i class="bi bi-plus-lg"></i> Agregar proveedor</button>
     </div>
-    <table class="table table-sm" id="cotizacionesTable">
+    <table class="table table-sm tabla-items" id="cotizacionesTable">
       <thead><tr><th>Proveedor</th><th style="width:160px;">Precio de costo</th><th style="width:160px;">Código del proveedor</th><th></th></tr></thead>
       <tbody id="cotizacionesBody"></tbody>
     </table>
@@ -154,8 +154,8 @@
         {% endfor %}
       </select>
     </td>
-    <td><input type="number" step="0.01" name="cotiz_precio_costo" class="form-control form-control-sm"></td>
-    <td><input type="text" name="cotiz_codigo_proveedor" class="form-control form-control-sm" placeholder="opcional"></td>
+    <td data-label="Precio de costo"><input type="number" step="0.01" name="cotiz_precio_costo" class="form-control form-control-sm"></td>
+    <td data-label="Código del proveedor"><input type="text" name="cotiz_codigo_proveedor" class="form-control form-control-sm" placeholder="opcional"></td>
     <td><button type="button" class="btn btn-sm btn-outline-danger" onclick="this.closest('tr').remove()"><i class="bi bi-trash"></i></button></td>
   </tr>
 </template>

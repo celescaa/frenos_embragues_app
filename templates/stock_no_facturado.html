@@ -53,33 +53,33 @@
 
 <div class="card p-3">
   <h6 class="mb-3">Historial</h6>
-  <table class="table table-hover align-middle mb-0">
+  <table class="table table-hover align-middle mb-0 tabla-fichas">
     <thead>
       <tr><th>Fecha</th><th>Tipo</th><th>Producto</th><th class="text-end">Cantidad</th><th class="text-end">Precio</th><th>Contraparte</th><th>Conciliado</th><th></th></tr>
     </thead>
     <tbody>
     {% for m in movimientos %}
       <tr>
-        <td>{{ m.fecha }}</td>
-        <td>
+        <td class="ficha-dato">{{ m.fecha }}</td>
+        <td class="ficha-dato">
           {% if m.tipo == 'compra' %}
             <span class="badge bg-success">Compra</span>
           {% else %}
             <span class="badge bg-secondary">Venta</span>
           {% endif %}
         </td>
-        <td>{{ m.producto_nombre }} <span class="text-muted small">({{ m.producto_codigo or 's/código' }})</span></td>
-        <td class="text-end">{{ m.cantidad }}</td>
-        <td class="text-end">{{ m.precio|money }}</td>
-        <td>{{ m.contraparte or '' }} {% if m.observaciones %}<div class="text-muted small">{{ m.observaciones }}</div>{% endif %}</td>
-        <td>
-          {% if m.conciliado %}
+        <td class="ficha-titulo">{{ m.producto_nombre }} <span class="text-muted small">({{ m.producto_codigo or 's/código' }})</span></td>
+        <td class="text-end ficha-dato">{{ m.cantidad }}<span class="d-md-none"> u.</span></td>
+        <td class="text-end ficha-destacado">{{ m.precio|money }}</td>
+        <td class="ficha-dato">{{ m.contraparte or '' }} {% if m.observaciones %}<div class="text-muted small">{{ m.observaciones }}</div>{% endif %}</td>
+        <td class="ficha-dato">
+          <span class="d-md-none">conciliado: </span>{% if m.conciliado %}
             <span class="badge bg-success">Sí</span>
           {% else %}
             <span class="badge bg-warning text-dark">No</span>
           {% endif %}
         </td>
-        <td class="text-end">
+        <td class="text-end ficha-acciones">
           {% if m.conciliado %}
             <form method="post" action="{{ url_for('stock_no_facturado_desconciliar', movimiento_id=m.id) }}">
               <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
