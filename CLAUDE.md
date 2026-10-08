@@ -1625,6 +1625,16 @@ caracteres (Eine pone todos los autos en la descripción) y otro tanto en
   mínimo 2 (el default), y el 84% del stock real tiene 1 o 2 unidades, así
   que casi todo sale en rojo hasta que el negocio ajuste los mínimos.
 
+- **En el celular es una lista de fichas, no una tabla** (08/10/2026). Las
+  columnas de ancho fijo suman más que una pantalla de 375 px y a "Producto"
+  no le quedaba lugar. Bajo 768 px cada fila pasa a `display: grid`: el
+  nombre a todo el ancho y debajo un renglón con precio, stock y botones. Los
+  filtros van de a dos por renglón. Es sólo CSS sobre la misma tabla (clases
+  `celda-*` en cada `<td>`), no un segundo marcado para mantener.
+- **El stock mínimo de la carga real se bajó de 2 a 1** el 08/10/2026, a
+  pedido de Celes. Con mínimo 1 siguen en rojo los 595 productos que tienen
+  una sola unidad.
+
 **No se pudo correr la suite**: la Mac de Celes tiene Docker Desktop
 desinstalado (queda la carpeta `/Applications/Docker.app` vacía), así que no
 hay Supabase local. Los tests nuevos están escritos pero sin ejecutar. Lo que

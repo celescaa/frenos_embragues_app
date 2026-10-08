@@ -8,11 +8,11 @@
 
 <form class="mb-2" method="get" id="filtroForm">
   <div class="row g-2 mb-2">
-    <div class="col-md-9">
+    <div class="col-8 col-md-9">
       <input type="text" name="q" id="qFiltro" value="{{ q or '' }}" class="form-control" autocomplete="off"
              placeholder="Buscar: pastilla palio, código, marca, proveedor...">
     </div>
-    <div class="col-md-3 d-flex align-items-center">
+    <div class="col-4 col-md-3 d-flex align-items-center">
       <div class="form-check">
         <input class="form-check-input" type="checkbox" name="solo_con_stock" value="1"
                id="soloConStock" {{ 'checked' if solo_con_stock }} onchange="this.form.submit()">
@@ -21,7 +21,7 @@
     </div>
   </div>
   <div class="row g-2">
-    <div class="col-md">
+    <div class="col-6 col-md">
       <select name="categoria" id="categoriaFiltro" class="form-select">
         <option value="">Todos los rubros</option>
         {% for cat in categorias %}
@@ -31,12 +31,12 @@
         {% endfor %}
       </select>
     </div>
-    <div class="col-md">
+    <div class="col-6 col-md">
       <select name="subcategoria" id="subcategoriaFiltro" class="form-select">
         <option value="">Todos los subrubros</option>
       </select>
     </div>
-    <div class="col-md">
+    <div class="col-6 col-md">
       <select name="marca" class="form-select" onchange="this.form.submit()">
         <option value="">Todas las marcas</option>
         {% for m in marcas %}
@@ -46,7 +46,7 @@
         {% endfor %}
       </select>
     </div>
-    <div class="col-md">
+    <div class="col-6 col-md">
       <select name="proveedor_id" class="form-select" onchange="this.form.submit()">
         <option value="">Todos los proveedores</option>
         {% for pr in proveedores %}
@@ -56,7 +56,7 @@
         {% endfor %}
       </select>
     </div>
-    <div class="col-md">
+    <div class="col-6 col-md">
       <select name="vehiculo_id" class="form-select" onchange="this.form.submit()">
         <option value="">Todos los autos</option>
         {% for v in vehiculos %}
@@ -168,8 +168,28 @@
                 font-size: 1.05rem; font-weight: 600; text-align: center; }
   .prod-stock-bajo { background: #fde8e8; color: #b42318; }
   .prod-mas-barato { color: #15803d; }
+  /* En el celular no entra una tabla: las columnas de ancho fijo (precio,
+     stock, botones) suman más que la pantalla y a "Producto" no le quedaba
+     lugar. Cada producto pasa a ser una ficha: el nombre arriba a todo el
+     ancho, y abajo un renglón con precio, stock y botones. */
   @media (max-width: 767px) {
-    .tabla-productos .col-rubro, .tabla-productos .celda-rubro { display: none; }
+    .tabla-productos, .tabla-productos tbody { display: block; width: 100%; }
+    .tabla-productos thead { display: none; }
+    .tabla-productos tr { display: block; }
+    .tabla-productos tr.fila-producto {
+      display: grid; grid-template-columns: minmax(0, 1fr) auto auto;
+      gap: 6px 12px; align-items: center; padding: 12px 0;
+      border-bottom: 1px solid #e5e7eb;
+    }
+    .tabla-productos td { display: block; padding: 0; border: 0; }
+    .tabla-productos .celda-foto, .tabla-productos .celda-rubro { display: none; }
+    .tabla-productos .celda-producto { grid-column: 1 / -1; }
+    .tabla-productos .celda-precio { text-align: left !important; }
+    /* Sin encabezado de tabla, el número suelto no dice qué es. */
+    .tabla-productos .celda-stock::before { content: "Stock "; font-size: 0.75rem; color: #6b7280; }
+    .prod-nombre { -webkit-line-clamp: 3; }
+    .prod-detalle { white-space: normal; display: -webkit-box; -webkit-line-clamp: 2;
+                    -webkit-box-orient: vertical; }
   }
 </style>
 <div class="card p-3">
@@ -184,14 +204,14 @@
     <tbody id="productosBody">
     {% for p in productos %}
       <tr class="fila-producto">
-        <td>
+        <td class="celda-foto">
           {% if p.imagen %}
             <img src="{{ p.imagen|url_imagen }}" alt="" style="width:40px;height:40px;object-fit:cover;border-radius:6px;">
           {% else %}
             <span class="text-muted"><i class="bi bi-image" style="font-size:1.3rem;"></i></span>
           {% endif %}
         </td>
-        <td>
+        <td class="celda-producto">
           <div class="prod-nombre" title="{{ p.nombre }}">{{ p.nombre }}</div>
           {% set detalle = [p.marca, p.proveedor_nombre, p.modelo_compatible] | select | join(' · ') %}
           <div class="prod-detalle" title="{{ detalle }}">
@@ -209,18 +229,18 @@
         <td class="celda-rubro">
           <div class="prod-rubro">{{ p.categoria }}{% if p.subcategoria %}<br>{{ p.subcategoria }}{% endif %}</div>
         </td>
-        <td class="text-end">
+        <td class="text-end celda-precio">
           <div class="prod-precio">{{ p.precio_venta|money }}</div>
           <div class="prod-costo">costo {{ p.precio_costo|money }}</div>
         </td>
-        <td class="text-center">
+        <td class="text-center celda-stock">
           {# stock_minimo = 0 es "no controlar reposición de esto" (mismo
              criterio que /pedidos), así que no se marca. #}
           {% set bajo = p.stock_minimo > 0 and p.stock_actual <= p.stock_minimo %}
           <span class="prod-stock {{ 'prod-stock-bajo' if bajo }}"
                 title="Mínimo: {{ p.stock_minimo }}">{{ p.stock_actual }}</span>
         </td>
-        <td class="text-end">
+        <td class="text-end celda-acciones text-nowrap">
           <a href="{{ url_for('productos_editar', producto_id=p.id) }}" class="btn btn-sm btn-outline-secondary"><i class="bi bi-pencil"></i></a>
           <form method="post" action="{{ url_for('productos_eliminar', producto_id=p.id) }}" class="d-inline" onsubmit="return confirm('¿Eliminar este producto?');">
             <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
